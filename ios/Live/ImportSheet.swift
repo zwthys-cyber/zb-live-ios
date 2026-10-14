@@ -64,6 +64,7 @@ struct ImportSheet: View {
                 Spacer()
                 Button { showFile = true } label: { Label("选文件", systemImage: "folder") }.disabled(busy)
             }
+            .buttonStyle(.borderless)
         } footer: {
             Text("支持 M3U、JSON 和每行一个链接的文本，最大 5 MB / 5000 个频道。HLS 的 .m3u8 播放地址请在「打开链接」中播放。")
         }
