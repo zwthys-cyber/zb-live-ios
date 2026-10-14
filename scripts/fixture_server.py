@@ -4,6 +4,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import re
 import os
+from fixture_api import serve as serve_api
 
 ROOT = Path(__file__).resolve().parent.parent / 'tests/Fixtures'
 
@@ -12,6 +13,8 @@ class Handler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
     def do_GET(self):
+        if serve_api(self):
+            return
         requested = Path(self.translate_path(self.path)).resolve()
         if ROOT.resolve() not in requested.parents:
             self.send_error(404)

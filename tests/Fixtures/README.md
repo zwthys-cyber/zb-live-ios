@@ -9,3 +9,5 @@ ffmpeg -f lavfi -i color=c=0x247B85:s=320x180:r=24 -f lavfi -i anullsrc=r=44100:
 `sample.m3u8` and its four MPEG-TS segments contain the same generated solid-color / silent content, encoded with two-second keyframes using FFmpeg's HLS VOD muxer. `channels.m3u` is a subscription with a relative link to that local HLS fixture.
 
 The server binds only to `127.0.0.1`. It supports range requests required by AVPlayer. The iOS simulator reaches this local server at `http://127.0.0.1:8765/`. An optional `LIVE_FIXTURE_PORT` environment variable changes the port for local development.
+
+协议服务使用 api-test-private.pem（专门生成的公开测试密钥，与生产密钥无关），验证 HMAC、32 位设备 ID、RSA-OAEP-SHA256、票据、会话续期、AES-CBC enc=1 / enc=2。协议测试仅播放本地纯色视频。

@@ -18,15 +18,19 @@ struct LiveItem: Codable, Identifiable, Hashable, Sendable {
     var url: URL
     var kind: LinkKind
     var group: String
+    var headers: [String: String]?
+    var roomID: String?
 
-    var id: String { SHA256.hash(data: Data(url.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined() }
+    var id: String { SHA256.hash(data: Data((roomID.map { "room:" + $0 } ?? url.absoluteString).utf8)).map { String(format: "%02x", $0) }.joined() }
     var host: String { url.host ?? "" }
 
-    init(name: String, url: URL, kind: LinkKind? = nil, group: String = "") {
+    init(name: String, url: URL, kind: LinkKind? = nil, group: String = "", headers: [String: String]? = nil, roomID: String? = nil) {
         self.name = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? (url.host ?? "直播") : name
         self.url = url
         self.kind = kind ?? LinkKind.detect(url)
         self.group = group
+        self.headers = headers
+        self.roomID = roomID
     }
 }
 

@@ -28,8 +28,10 @@ struct RootView: View {
 
     var body: some View {
         TabView {
+            NavigationStack { LiveDirectoryView() }
+                .tabItem { Label("直播", systemImage: "dot.radiowaves.left.and.right") }
             NavigationStack { HomeView() }
-                .tabItem { Label("直播", systemImage: "play.rectangle.fill") }
+                .tabItem { Label("频道", systemImage: "play.rectangle.fill") }
             NavigationStack { FavoritesView() }
                 .tabItem { Label("收藏", systemImage: "heart.fill") }
             NavigationStack { SettingsView() }
@@ -37,7 +39,8 @@ struct RootView: View {
         }
         .fullScreenCover(item: $router.selected) { item in
             NavigationStack {
-                if item.kind == .web { BrowserScreen(item: item) }
+                if item.roomID != nil { RemotePlaybackScreen(item: item) }
+                else if item.kind == .web { BrowserScreen(item: item) }
                 else { PlayerScreen(item: item) }
             }
             .environmentObject(library)

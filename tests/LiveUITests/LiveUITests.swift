@@ -7,7 +7,32 @@ final class LiveUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
+        app.tabBars.buttons["频道"].tap()
         return app
+    }
+
+    func testRecoveredAPIPlatformRoomSessionRenewalAndPlayback() throws {
+        let app = launch()
+        app.tabBars.buttons["直播"].tap()
+        let platform = app.buttons["platform_38"]
+        // NavigationLink may be exposed as a button by SwiftUI accessibility.
+        XCTAssertTrue(platform.waitForExistence(timeout: 20))
+        platform.tap()
+        let room = app.buttons["room_38_fixture"]
+        XCTAssertTrue(room.waitForExistence(timeout: 15))
+        room.tap()
+        let player = app.descendants(matching: .any).matching(identifier: "nativePlayer").firstMatch
+        XCTAssertTrue(player.waitForExistence(timeout: 20))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "已就绪"), object: player)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 20), .completed)
+        app.buttons["收藏视频"].tap()
+        app.buttons["关闭播放"].tap()
+        app.tabBars.buttons["收藏"].tap()
+        XCTAssertTrue(app.staticTexts["测试直播间"].waitForExistence(timeout: 5))
+        app.staticTexts["测试直播间"].tap()
+        XCTAssertTrue(player.waitForExistence(timeout: 20))
+        let reopened = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "已就绪"), object: player)
+        XCTAssertEqual(XCTWaiter.wait(for: [reopened], timeout: 20), .completed)
     }
 
     func testHomeAndNavigation() throws {

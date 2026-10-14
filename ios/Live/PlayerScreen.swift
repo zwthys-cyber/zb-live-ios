@@ -27,7 +27,8 @@ final class PlaybackModel: NSObject, ObservableObject {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
             try AVAudioSession.sharedInstance().setActive(true)
         } catch { /* Player status reports playback failures; an audio-session warning needn't stop video. */ }
-        let playerItem = AVPlayerItem(url: item.url)
+        let asset = AVURLAsset(url: item.url, options: item.headers.map { ["AVURLAssetHTTPHeaderFieldsKey": $0] } ?? [:])
+        let playerItem = AVPlayerItem(asset: asset)
         player.replaceCurrentItem(with: playerItem)
         player.automaticallyWaitsToMinimizeStalling = true
         statusObservation = playerItem.observe(\.status, options: [.initial, .new]) { [weak self] value, _ in
