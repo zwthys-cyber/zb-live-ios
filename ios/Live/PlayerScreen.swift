@@ -101,12 +101,16 @@ private struct NativePlayer: UIViewControllerRepresentable {
 
 struct PlayerScreen: View {
     let item: LiveItem
+    let onReconnect: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var library: LibraryStore
     @StateObject private var model: PlaybackModel
 
-    init(item: LiveItem) { self.item = item; _model = StateObject(wrappedValue: PlaybackModel(item: item)) }
+    init(item: LiveItem, onReconnect: (() -> Void)? = nil) {
+        self.item = item; self.onReconnect = onReconnect
+        _model = StateObject(wrappedValue: PlaybackModel(item: item))
+    }
 
     var body: some View {
         ZStack {
@@ -123,7 +127,7 @@ struct PlayerScreen: View {
             if let error = model.error {
                 VStack(spacing: 16) {
                     QuietEmpty(symbol: "play.slash", title: "暂时无法播放", detail: error)
-                    Button("重新连接") { model.start() }.buttonStyle(.borderedProminent).foregroundStyle(Theme.background)
+                    Button("重新连接") { if let onReconnect { onReconnect() } else { model.start() } }.buttonStyle(.borderedProminent).foregroundStyle(Theme.background)
                     Button("在 Safari 中打开") { UIApplication.shared.open(item.url) }.buttonStyle(.bordered)
                     Text("直播地址可能已过期，或需要网站登录、特殊播放器。可以返回平台网页继续观看。")
                         .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 24)

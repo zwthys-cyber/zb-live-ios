@@ -17,7 +17,7 @@ SIGN = b'HtxDnCtl7ePUvZU9SE0tfDSjR'
 KEY, IV = b'Dn7kQp2mXw9sL4aR', b'u8hE3nBqK1zT6cYf'
 ROOT = Path(__file__).resolve().parent.parent / 'tests/Fixtures'
 PRIVATE_KEY = serialization.load_pem_private_key((ROOT / 'api-test-private.pem').read_bytes(), password=None)
-SESSIONS, RETRIED = {}, set()
+SESSIONS, RETRIED, PLAYBACK_CALLS = {}, set(), {}
 
 def compact(value):
     return json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode()
@@ -81,7 +81,11 @@ def serve(handler):
                     RETRIED.add(device)
                     respond(handler, 401, {'error': 'session expired'})
                 else:
-                    respond(handler, 0, {**room, 'user_agent': 'Live-Protocol-Fixture'}, session_key=key)
+                    count = PLAYBACK_CALLS.get(device, 0) + 1
+                    PLAYBACK_CALLS[device] = count
+                    # A failed media URL must cause a new live/play request.
+                    media = origin + ('/expired.m3u8' if count == 1 else '/sample.m3u8')
+                    respond(handler, 0, {**room, 'cdn_hls_url': media, 'user_agent': 'Live-Protocol-Fixture'}, session_key=key)
             else:
                 respond(handler, 404, {'error': 'unknown fixture route'})
     except Exception as error:

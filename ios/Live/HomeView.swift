@@ -115,7 +115,7 @@ struct HomeView: View {
         }
         .background(Theme.background)
         .accessibilityIdentifier("homeScroll")
-        .navigationTitle("直播")
+        .navigationTitle("频道")
         .searchable(text: $search, prompt: "搜索平台或频道")
         .onChange(of: groups) { _, values in if !values.contains(selectedGroup) { selectedGroup = "全部" } }
         .sheet(isPresented: $showOpen, onDismiss: {

@@ -120,7 +120,7 @@ struct RemotePlaybackScreen: View {
     @State private var attempt = 0
     var body: some View {
         Group {
-            if let resolved { PlayerScreen(item: resolved) }
+            if let resolved { PlayerScreen(item: resolved, onReconnect: { self.resolved = nil; attempt += 1 }) }
             else {
                 VStack(spacing: 18) {
                     if let error {

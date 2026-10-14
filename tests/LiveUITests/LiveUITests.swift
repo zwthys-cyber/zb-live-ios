@@ -21,6 +21,9 @@ final class LiveUITests: XCTestCase {
         let room = app.buttons["room_38_fixture"]
         XCTAssertTrue(room.waitForExistence(timeout: 15))
         room.tap()
+        let reconnect = app.buttons["重新连接"]
+        XCTAssertTrue(reconnect.waitForExistence(timeout: 25))
+        reconnect.tap()
         let player = app.descendants(matching: .any).matching(identifier: "nativePlayer").firstMatch
         XCTAssertTrue(player.waitForExistence(timeout: 20))
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "已就绪"), object: player)
