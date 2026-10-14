@@ -116,6 +116,7 @@ struct HomeView: View {
         .background(Theme.background)
         .navigationTitle("直播")
         .searchable(text: $search, prompt: "搜索平台或频道")
+        .onChange(of: groups) { _, values in if !values.contains(selectedGroup) { selectedGroup = "全部" } }
         .sheet(isPresented: $showOpen, onDismiss: {
             if let item = pending { pending = nil; router.open(item) }
         }) { OpenLinkSheet { pending = $0 } }

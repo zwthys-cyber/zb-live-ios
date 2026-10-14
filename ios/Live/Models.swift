@@ -52,7 +52,7 @@ struct Subscription: Codable, Identifiable, Hashable, Sendable {
 }
 
 enum LiveError: LocalizedError {
-    case invalidURL, noItems, hlsPlaylist, unsupportedScheme, tooLarge, invalidJSON
+    case invalidURL, noItems, hlsPlaylist, unsupportedScheme, tooLarge, invalidJSON, tooManyChannels
     case http(Int)
 
     var errorDescription: String? {
@@ -63,6 +63,7 @@ enum LiveError: LocalizedError {
         case .hlsPlaylist: return "这是 HLS 播放清单，请在「打开链接」中直接播放此地址。"
         case .tooLarge: return "频道列表超过 5 MB，请使用较小的文件。"
         case .invalidJSON: return "JSON 格式无法识别。每个频道需要名称和 HTTP / HTTPS 地址。"
+        case .tooManyChannels: return "保存后的频道总数将超过 5000 个。请先移除部分频道，或清空旧列表后重试。"
         case .http(let status): return "服务器返回 HTTP \(status)，请检查地址或在平台网页内登录。"
         }
     }

@@ -54,8 +54,10 @@ struct ImportSheet: View {
                         }
                         if preview.count > 8 { Text("另有 \(preview.count - 8) 个频道").font(.caption).foregroundStyle(.secondary) }
                         Button {
-                            _ = library.importItems(preview, subscriptionURL: sourceURL)
-                            success = true
+                            do {
+                                _ = try library.importItems(preview, subscriptionURL: sourceURL)
+                                success = true
+                            } catch { self.error = error.localizedDescription }
                         } label: { Label("导入 \(preview.count) 个频道", systemImage: "checkmark.circle.fill").fontWeight(.semibold) }
                             .accessibilityIdentifier("saveChannels")
                     } footer: { Text("相同地址的频道会更新名称与分组。订阅刷新会合并频道，不会自动删除已导入频道。") }

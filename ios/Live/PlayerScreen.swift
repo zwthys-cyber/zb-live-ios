@@ -32,6 +32,7 @@ final class PlaybackModel: NSObject, ObservableObject {
         statusObservation = playerItem.observe(\.status, options: [.initial, .new]) { [weak self] value, _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                guard self.player.currentItem === value else { return }
                 switch value.status {
                 case .readyToPlay:
                     if !self.didRecord { self.didRecord = true; self.ready?() }
@@ -85,8 +86,12 @@ private struct NativePlayer: UIViewControllerRepresentable {
     class Coordinator: NSObject, AVPlayerViewControllerDelegate {
         let model: PlaybackModel
         init(model: PlaybackModel) { self.model = model }
-        func playerViewControllerDidStartPictureInPicture(_ playerViewController: AVPlayerViewController) { model.pipActive = true }
-        func playerViewControllerDidStopPictureInPicture(_ playerViewController: AVPlayerViewController) { model.pipActive = false }
+        func playerViewControllerDidStartPictureInPicture(_ playerViewController: AVPlayerViewController) {
+            Task { @MainActor [weak model] in model?.pipActive = true }
+        }
+        func playerViewControllerDidStopPictureInPicture(_ playerViewController: AVPlayerViewController) {
+            Task { @MainActor [weak model] in model?.pipActive = false }
+        }
         func playerViewController(_ playerViewController: AVPlayerViewController, restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) { completionHandler(true) }
     }
 }

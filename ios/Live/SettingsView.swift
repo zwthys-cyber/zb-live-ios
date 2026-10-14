@@ -138,7 +138,7 @@ struct SubscriptionsView: View {
             do {
                 let items = try await PlaylistFetcher.load(source.url)
                 guard !Task.isCancelled else { return }
-                let count = library.importItems(items, subscriptionURL: source.url)
+                let count = try library.importItems(items, subscriptionURL: source.url)
                 result = "已读取并合并 \(count) 个频道。"
             } catch { if !Task.isCancelled { result = error.localizedDescription } }
         }

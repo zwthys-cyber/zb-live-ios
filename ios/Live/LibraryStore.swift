@@ -53,7 +53,10 @@ final class LibraryStore: ObservableObject {
         save()
     }
 
-    func importItems(_ items: [LiveItem], subscriptionURL: URL? = nil) -> Int {
+    func importItems(_ items: [LiveItem], subscriptionURL: URL? = nil) throws -> Int {
+        guard Set(snapshot.channels.map(\.id)).union(items.map(\.id)).count <= PlaylistParser.maximumChannels else {
+            throw LiveError.tooManyChannels
+        }
         var byID = Dictionary(snapshot.channels.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
         for item in items { byID[item.id] = item }
         let prior = Set(snapshot.channels.map(\.id))
@@ -66,7 +69,7 @@ final class LibraryStore: ObservableObject {
             snapshot.subscriptions.insert(Subscription(url: url, name: url.host ?? "频道列表", updated: Date()), at: 0)
         }
         save()
-        return items.count
+        return Set(items.map(\.id)).count
     }
 
     func removeChannel(_ item: LiveItem) { snapshot.channels.removeAll { $0.id == item.id }; save() }

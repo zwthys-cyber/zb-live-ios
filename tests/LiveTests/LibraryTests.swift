@@ -27,9 +27,9 @@ final class LibraryTests: XCTestCase {
             let store = LibraryStore(ephemeral: true)
             var item = LiveItem(name: "Old", url: try LinkValidator.parse("https://example.com/a.m3u8"))
             store.toggleFavorite(item)
-            _ = store.importItems([item], subscriptionURL: try LinkValidator.parse("https://example.com/channels.m3u"))
+            _ = try store.importItems([item], subscriptionURL: try LinkValidator.parse("https://example.com/channels.m3u"))
             item.name = "Updated"
-            _ = store.importItems([item, item])
+            _ = try store.importItems([item, item])
             XCTAssertEqual(store.channels.count, 1)
             XCTAssertEqual(store.channels[0].name, "Updated")
             XCTAssertEqual(store.subscriptions.count, 1)
@@ -68,6 +68,19 @@ final class LibraryTests: XCTestCase {
             XCTAssertEqual(backups.count, 1)
             XCTAssertEqual(try Data(contentsOf: backups[0]), original)
             XCTAssertTrue(LibraryStore(fileURL: path).backgroundAudio)
+        }
+    }
+
+    func testCapacityFailureLeavesLibraryUntouched() async throws {
+        try await MainActor.run {
+            let store = LibraryStore(ephemeral: true)
+            let initial = LiveItem(name: "Saved", url: try LinkValidator.parse("https://example.com/saved.m3u8"))
+            _ = try store.importItems([initial])
+            let oversized = (0..<PlaylistParser.maximumChannels).map {
+                LiveItem(name: "\($0)", url: URL(string: "https://example.com/\($0).m3u8")!)
+            }
+            XCTAssertThrowsError(try store.importItems(oversized))
+            XCTAssertEqual(store.channels, [initial])
         }
     }
 }
