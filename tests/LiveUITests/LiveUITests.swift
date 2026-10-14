@@ -47,8 +47,7 @@ final class LiveUITests: XCTestCase {
         editor.typeText("#EXTM3U\n#EXTINF:-1,Test Channel\nhttps://example.com/test.m3u8\n")
         app.buttons["readChannels"].tap()
         let save = app.buttons["saveChannels"]
-        if !save.isHittable { app.swipeUp() }
-        XCTAssertTrue(save.waitForExistence(timeout: 3))
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
         save.tap()
         XCTAssertTrue(app.alerts["导入完成"].waitForExistence(timeout: 3))
         app.alerts.buttons["完成"].tap()
@@ -110,7 +109,6 @@ final class LiveUITests: XCTestCase {
         app.buttons["readChannels"].tap()
         let save = app.buttons["saveChannels"]
         XCTAssertTrue(save.waitForExistence(timeout: 15))
-        if !save.isHittable { app.swipeUp() }
         save.tap()
         XCTAssertTrue(app.alerts["导入完成"].waitForExistence(timeout: 3))
         app.alerts.buttons["完成"].tap()

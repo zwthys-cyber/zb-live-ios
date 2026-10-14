@@ -20,7 +20,14 @@ struct ImportSheet: View {
             content
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle("导入频道").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("完成") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("完成") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    if !preview.isEmpty {
+                        Button("导入", action: savePreview).disabled(busy).accessibilityIdentifier("saveChannels")
+                    }
+                }
+            }
             .onChange(of: input) { _, _ in preview = []; sourceURL = nil; error = nil }
             .onChange(of: useSubscription) { _, _ in input = ""; preview = []; sourceURL = nil; error = nil }
             .onDisappear { task?.cancel() }
@@ -84,9 +91,6 @@ struct ImportSheet: View {
                 }
             }
             if preview.count > 8 { Text("另有 \(preview.count - 8) 个频道").font(.caption).foregroundStyle(.secondary) }
-            Button(action: savePreview) {
-                Label("导入 \(preview.count) 个频道", systemImage: "checkmark.circle.fill").fontWeight(.semibold)
-            }.accessibilityIdentifier("saveChannels")
         } header: {
             Text("已识别 \(preview.count) 个频道")
         } footer: {
