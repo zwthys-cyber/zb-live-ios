@@ -55,4 +55,37 @@ final class LiveUITests: XCTestCase {
         app.swipeUp()
         XCTAssertTrue(app.staticTexts["Test Channel"].waitForExistence(timeout: 3))
     }
+
+    private func openFixture(_ app: XCUIApplication, path: String, name: String) {
+        app.buttons["openLink"].tap()
+        let field = app.descendants(matching: .any).matching(identifier: "linkURL").firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 3))
+        field.tap()
+        field.typeText("http://127.0.0.1:8765/" + path)
+        let nameField = app.textFields["linkName"]
+        nameField.tap()
+        nameField.typeText(name)
+        app.buttons["confirmOpen"].tap()
+    }
+
+    func testLocalWebsiteLoadingAndCurrentPageFavorite() throws {
+        let app = launch()
+        openFixture(app, path: "page.html", name: "Web fixture")
+        XCTAssertTrue(app.webViews.staticTexts["Local test page"].waitForExistence(timeout: 15))
+        app.buttons["收藏当前页面"].tap()
+        app.buttons["关闭网页"].tap()
+        app.tabBars.buttons["收藏"].tap()
+        XCTAssertTrue(app.staticTexts["Web fixture"].waitForExistence(timeout: 3))
+    }
+
+    func testNativeVideoBecomesReadyAndEntersHistory() throws {
+        let app = launch()
+        openFixture(app, path: "sample.mp4", name: "Video fixture")
+        let player = app.descendants(matching: .any).matching(identifier: "nativePlayer").firstMatch
+        XCTAssertTrue(player.waitForExistence(timeout: 10))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "已就绪"), object: player)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 20), .completed)
+        app.buttons["关闭播放"].tap()
+        XCTAssertTrue(app.staticTexts["Video fixture"].waitForExistence(timeout: 3))
+    }
 }

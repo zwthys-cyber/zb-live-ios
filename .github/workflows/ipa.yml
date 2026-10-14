@@ -45,6 +45,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p build
+          python3 scripts/fixture_server.py > build/fixture-server.log 2>&1 &
           xcodebuild -project Live.xcodeproj -scheme Live -configuration Debug \
             -destination "platform=iOS Simulator,id=$LIVE_SIMULATOR" \
             -destination-timeout 120 -derivedDataPath build/tests \
@@ -78,6 +79,7 @@ jobs:
             build/test.log
             build/TestResults.xcresult
             build/Home.png
+            build/fixture-server.log
           if-no-files-found: ignore
           retention-days: 14
 

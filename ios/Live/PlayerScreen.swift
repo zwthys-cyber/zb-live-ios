@@ -9,6 +9,7 @@ final class PlaybackModel: NSObject, ObservableObject {
     @Published var error: String?
     @Published var buffering = true
     @Published var pipActive = false
+    @Published var isReady = false
     var ready: (() -> Void)?
     private var statusObservation: NSKeyValueObservation?
     private var timeObservation: NSKeyValueObservation?
@@ -21,7 +22,7 @@ final class PlaybackModel: NSObject, ObservableObject {
         statusObservation?.invalidate()
         timeObservation?.invalidate()
         if let failureObserver { NotificationCenter.default.removeObserver(failureObserver) }
-        error = nil; buffering = true
+        error = nil; buffering = true; isReady = false
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
             try AVAudioSession.sharedInstance().setActive(true)
@@ -35,6 +36,7 @@ final class PlaybackModel: NSObject, ObservableObject {
                 guard self.player.currentItem === value else { return }
                 switch value.status {
                 case .readyToPlay:
+                    self.isReady = true
                     if !self.didRecord { self.didRecord = true; self.ready?() }
                 case .failed:
                     self.buffering = false
@@ -109,6 +111,10 @@ struct PlayerScreen: View {
         ZStack {
             Color.black.ignoresSafeArea()
             NativePlayer(model: model).ignoresSafeArea(edges: .bottom)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("视频播放器")
+                .accessibilityValue(model.isReady ? "已就绪" : "连接中")
+                .accessibilityIdentifier("nativePlayer")
             if model.buffering, model.error == nil {
                 VStack(spacing: 12) { ProgressView().tint(.white); Text("正在连接直播源…").font(.caption).foregroundStyle(.white.opacity(0.7)) }
                     .padding(22).background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 18)).allowsHitTesting(false)

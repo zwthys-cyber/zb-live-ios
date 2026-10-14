@@ -163,6 +163,7 @@ struct OpenLinkSheet: View {
     @State private var name = ""
     @State private var mode = OpenMode.automatic
     @State private var error: String?
+    @FocusState private var urlFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -171,6 +172,7 @@ struct OpenLinkSheet: View {
                     TextField("https://", text: $urlText, axis: .vertical)
                         .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .accessibilityIdentifier("linkURL")
+                        .focused($urlFocused)
                     PasteButton(payloadType: String.self) { values in if let text = values.first { urlText = text } }
                 }
                 Section("打开方式") {
@@ -188,6 +190,7 @@ struct OpenLinkSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("打开") {
+                        urlFocused = false
                         do {
                             let url = try LinkValidator.parse(urlText)
                             let kind: LinkKind? = mode == .automatic ? nil : (mode == .web ? .web : .media)
