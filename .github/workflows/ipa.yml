@@ -1,0 +1,90 @@
+name: Build iOS 17 IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Select simulator
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available -j > /tmp/live-simulators.json
+          python3 - <<'PY'
+          import json, os
+          with open('/tmp/live-simulators.json') as f:
+              devices = json.load(f)['devices']
+          iphones = [d for runtime, entries in devices.items() if '.iOS-' in runtime for d in entries if d['name'].startswith('iPhone') and d.get('isAvailable')]
+          assert iphones, 'No available iPhone simulator'
+          chosen = next((d for d in iphones if d['state'] == 'Booted'), iphones[0])
+          with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write('LIVE_SIMULATOR=' + chosen['udid'] + '\n')
+          print(chosen['name'], chosen['udid'])
+          PY
+
+      - name: Run parser, persistence and UI tests
+        run: |
+          set -o pipefail
+          mkdir -p build
+          xcodebuild -project Live.xcodeproj -scheme Live -configuration Debug \
+            -destination "platform=iOS Simulator,id=$LIVE_SIMULATOR" \
+            -destination-timeout 120 -derivedDataPath build/tests \
+            -resultBundlePath build/TestResults.xcresult -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO test 2>&1 | tee build/test.log
+
+      - name: Capture app screenshot
+        run: |
+          xcrun simctl terminate "$LIVE_SIMULATOR" app.personal.zb.live || true
+          xcrun simctl launch "$LIVE_SIMULATOR" app.personal.zb.live --ui-testing
+          sleep 2
+          xcrun simctl io "$LIVE_SIMULATOR" screenshot build/Home.png
+
+      - name: Build and package TrollStore IPA
+        run: bash scripts/build_ipa.sh
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Live-iOS17-TrollStore
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Live-test-evidence
+          path: |
+            build/test.log
+            build/TestResults.xcresult
+            build/Home.png
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Create private repository release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v1.0.${GITHUB_RUN_NUMBER}" dist/* \
+            --title "直播 iOS 17 · Build ${GITHUB_RUN_NUMBER}" \
+            --notes-file docs/RELEASE.md

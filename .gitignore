@@ -1,0 +1,12 @@
+*.apk
+*.ipa
+reverse-output/
+.venv/
+__pycache__/
+.DS_Store
+build/
+dist/
+*.zip
+*.xcodeproj/
+*.xcresult/
+ios/Info.plist
