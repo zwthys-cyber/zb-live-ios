@@ -51,8 +51,7 @@ final class LiveUITests: XCTestCase {
         save.tap()
         XCTAssertTrue(app.alerts["导入完成"].waitForExistence(timeout: 3))
         app.alerts.buttons["完成"].tap()
-        app.swipeUp()
-        XCTAssertTrue(app.staticTexts["Test Channel"].waitForExistence(timeout: 3))
+        scrollToChannel("Test Channel", in: app)
     }
 
     private func openFixture(_ app: XCUIApplication, path: String, name: String) {
@@ -65,6 +64,18 @@ final class LiveUITests: XCTestCase {
         nameField.tap()
         nameField.typeText(name)
         app.buttons["confirmOpen"].tap()
+    }
+
+    private func scrollToChannel(_ name: String, in app: XCUIApplication) {
+        let scroll = app.scrollViews["homeScroll"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+        let interactive = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: scroll)
+        XCTAssertEqual(XCTWaiter.wait(for: [interactive], timeout: 5), .completed)
+        for _ in 0..<6 {
+            if app.staticTexts[name].exists && app.staticTexts[name].isHittable { break }
+            scroll.swipeUp()
+        }
+        XCTAssertTrue(app.staticTexts[name].waitForExistence(timeout: 3))
     }
 
     func testLocalWebsiteLoadingAndCurrentPageFavorite() throws {
@@ -112,7 +123,6 @@ final class LiveUITests: XCTestCase {
         save.tap()
         XCTAssertTrue(app.alerts["导入完成"].waitForExistence(timeout: 3))
         app.alerts.buttons["完成"].tap()
-        app.swipeUp()
-        XCTAssertTrue(app.staticTexts["Local HLS"].waitForExistence(timeout: 3))
+        scrollToChannel("Local HLS", in: app)
     }
 }

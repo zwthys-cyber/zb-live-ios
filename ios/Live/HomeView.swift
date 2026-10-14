@@ -114,6 +114,7 @@ struct HomeView: View {
             .padding(20).frame(maxWidth: 960).frame(maxWidth: .infinity)
         }
         .background(Theme.background)
+        .accessibilityIdentifier("homeScroll")
         .navigationTitle("直播")
         .searchable(text: $search, prompt: "搜索平台或频道")
         .onChange(of: groups) { _, values in if !values.contains(selectedGroup) { selectedGroup = "全部" } }
