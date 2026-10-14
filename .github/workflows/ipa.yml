@@ -52,13 +52,8 @@ jobs:
             -resultBundlePath build/TestResults.xcresult -parallel-testing-enabled NO \
             CODE_SIGNING_ALLOWED=NO test 2>&1 | tee build/test.log
 
-      - name: Capture app screenshot
-        run: |
-          xcrun simctl terminate "$LIVE_SIMULATOR" app.personal.zb.live || true
-          xcrun simctl launch "$LIVE_SIMULATOR" app.personal.zb.live --ui-testing
-          sleep 2
-          xcrun simctl io "$LIVE_SIMULATOR" screenshot build/Home.png
-
+      # Home is captured by XCTest and retained in TestResults.xcresult. Xcode owns
+      # its simulator clones; no second launch against the shutdown template is needed.
       - name: Build and package TrollStore IPA
         run: bash scripts/build_ipa.sh
 
@@ -78,7 +73,6 @@ jobs:
           path: |
             build/test.log
             build/TestResults.xcresult
-            build/Home.png
             build/fixture-server.log
           if-no-files-found: ignore
           retention-days: 14
