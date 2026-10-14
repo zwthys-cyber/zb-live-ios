@@ -38,4 +38,8 @@ mkdir -p "$PACKAGE_STAGE/Payload"
 ditto "$APP_PATH" "$PACKAGE_STAGE/Payload/Live.app"
 ditto -c -k --keepParent "$PACKAGE_STAGE/Payload" dist/Live-iOS17-TrollStore.ipa
 python3 scripts/validate_ipa.py dist/Live-iOS17-TrollStore.ipa
-shasum -a 256 dist/Live-iOS17-TrollStore.ipa > dist/SHA256SUMS.txt
+python3 - <<'PY'
+import hashlib, pathlib
+p = pathlib.Path('dist/Live-iOS17-TrollStore.ipa')
+(p.parent / 'SHA256SUMS.txt').write_text(hashlib.sha256(p.read_bytes()).hexdigest() + '  ' + p.name + '\n')
+PY

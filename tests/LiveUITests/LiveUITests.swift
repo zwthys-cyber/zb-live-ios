@@ -88,4 +88,33 @@ final class LiveUITests: XCTestCase {
         app.buttons["关闭播放"].tap()
         XCTAssertTrue(app.staticTexts["Video fixture"].waitForExistence(timeout: 3))
     }
+
+    func testNativeHLSBecomesReady() throws {
+        let app = launch()
+        openFixture(app, path: "sample.m3u8", name: "HLS fixture")
+        let player = app.descendants(matching: .any).matching(identifier: "nativePlayer").firstMatch
+        XCTAssertTrue(player.waitForExistence(timeout: 10))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "已就绪"), object: player)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 20), .completed)
+        app.buttons["关闭播放"].tap()
+        XCTAssertTrue(app.staticTexts["HLS fixture"].waitForExistence(timeout: 3))
+    }
+
+    func testRemoteSubscriptionImport() throws {
+        let app = launch()
+        app.buttons["importChannels"].tap()
+        let field = app.descendants(matching: .any).matching(identifier: "subscriptionURL").firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 3))
+        field.tap()
+        field.typeText("http://127.0.0.1:8765/channels.m3u")
+        app.buttons["readChannels"].tap()
+        let save = app.buttons["saveChannels"]
+        XCTAssertTrue(save.waitForExistence(timeout: 15))
+        if !save.isHittable { app.swipeUp() }
+        save.tap()
+        XCTAssertTrue(app.alerts["导入完成"].waitForExistence(timeout: 3))
+        app.alerts.buttons["完成"].tap()
+        app.swipeUp()
+        XCTAssertTrue(app.staticTexts["Local HLS"].waitForExistence(timeout: 3))
+    }
 }
