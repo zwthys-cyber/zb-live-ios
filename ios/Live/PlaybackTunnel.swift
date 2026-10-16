@@ -50,11 +50,11 @@ final class PlaybackTunnel: @unchecked Sendable {
             return endpoint("live.m3u8")
         case .hls:
             let loaded = try await loadPlaylist(candidate.url, allowUnwrap: true)
-            lock.lock()
-            playlistSource = loaded.source
-            playlistFinal = loaded.final
-            warmed = loaded.data
-            lock.unlock()
+            lock.sync {
+                playlistSource = loaded.source
+                playlistFinal = loaded.final
+                warmed = loaded.data
+            }
             return endpoint("root.m3u8")
         }
     }
@@ -185,12 +185,12 @@ final class PlaybackTunnel: @unchecked Sendable {
     }
 
     private func currentPlaylist() async throws -> String {
-        lock.lock()
-        let cached = warmed
-        let final = playlistFinal
-        warmed = nil
-        let source = playlistSource
-        lock.unlock()
+        let (cached, final, source): (Data?, URL?, URL?) = lock.sync {
+            let cached = warmed
+            let final = playlistFinal
+            warmed = nil
+            return (cached, final, playlistSource)
+        }
         let data: Data
         let base: URL
         if let cached, let final {
@@ -221,10 +221,10 @@ final class PlaybackTunnel: @unchecked Sendable {
         var request = authorized(url)
         request.timeoutInterval = 6 * 60 * 60
         let task = session.dataTask(with: request)
-        lock.lock()
-        streamSession = session
-        flvTask = task
-        lock.unlock()
+        lock.sync {
+            streamSession = session
+            flvTask = task
+        }
         task.resume()
         let deadline = Date().addingTimeInterval(12)
         while Date() < deadline {
@@ -303,7 +303,7 @@ final class PlaybackTunnel: @unchecked Sendable {
         var extra = "Accept-Ranges: bytes\r\n"
         if let range = Self.byteRange(header, length: body.count), range.lowerBound >= 0, range.lowerBound < body.count {
             let end = min(body.count - 1, range.upperBound - 1)
-            payload = body.subdata(in: range.lowerBound...end)
+            payload = body.subdata(in: range.lowerBound..<(end + 1))
             code = 206
             reason = "Partial Content"
             extra += "Content-Range: bytes \(range.lowerBound)-\(end)/\(body.count)\r\n"
