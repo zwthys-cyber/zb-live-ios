@@ -2,7 +2,10 @@ name: Build iOS 17 IPA
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - cursor/**
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -80,6 +83,7 @@ jobs:
           retention-days: 14
 
       - name: Create private repository release
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
