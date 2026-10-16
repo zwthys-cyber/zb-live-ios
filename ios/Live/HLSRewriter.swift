@@ -116,6 +116,97 @@ enum HLSRewriter {
         }.joined(separator: "\n") + "\n"
     }
 
+    /// 1080p. At or above this, another playlist is not worth the extra wait.
+    static let hdThreshold = 1920 * 1080
+
+    /// Largest declared frame, or a resolution hint written into a single media playlist.
+    static func sharpness(_ playlist: String) -> Int {
+        let normalized = playlist.replacingOccurrences(of: "\u{FEFF}", with: "").replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+        let lines = normalized.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let infos = lines.filter { $0.hasPrefix("#EXT-X-STREAM-INF:") }
+        if !infos.isEmpty {
+            let frame = infos.map(pixels).max() ?? 0
+            if frame > 0 { return frame }
+            return (infos.map(bandwidth).max() ?? 0) / 8
+        }
+        return hintedPixels(normalized)
+    }
+
+    /// Encrypted or custom-container playlists are not a safe replacement for a clear one.
+    static func isDirectlyPlayable(_ playlist: String) -> Bool {
+        let upper = playlist.uppercased()
+        guard upper.contains("#EXTM3U") else { return false }
+        if upper.contains("MOUFLON") { return false }
+        if upper.contains("METHOD=AES") || upper.contains("METHOD=SAMPLE") { return false }
+        return true
+    }
+
+    /// Higher renditions and the adaptive `auto` playlist on the same address.
+    static func upgradeURLs(for url: URL) -> [URL] {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return [] }
+        if let path = replacements(in: components.percentEncodedPath) {
+            return path.compactMap { value in
+                var copy = components
+                copy.percentEncodedPath = value
+                return copy.url
+            }
+        }
+        guard let query = components.percentEncodedQuery, let replaced = replacements(in: query) else { return [] }
+        return replaced.compactMap { value in
+            var copy = components
+            copy.percentEncodedQuery = value
+            return copy.url
+        }
+    }
+
+    private static func replacements(in text: String) -> [String]? {
+        let pattern = "(?i)(?:^|(?<=[/_.:=-]))(144|240|360|480|540|576|720|960|1080|1440|2160)(p)?(?=$|[/_.?&#=-])"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = regex.firstMatch(in: text, range: range),
+              let full = Range(match.range, in: text),
+              let number = Range(match.range(at: 1), in: text),
+              let height = Int(text[number]) else { return nil }
+        let hasP = Range(match.range(at: 2), in: text) != nil
+        var tokens: [String] = []
+        for target in [1080, 720, 1440] where target > height {
+            tokens.append(hasP ? "\(target)p" : "\(target)")
+        }
+        tokens.append("auto")
+        var seen = Set<String>()
+        var results: [String] = []
+        for token in tokens {
+            var copy = text
+            copy.replaceSubrange(full, with: token)
+            if copy != text, seen.insert(copy).inserted { results.append(copy) }
+        }
+        return results.isEmpty ? nil : results
+    }
+
+    private static func hintedPixels(_ text: String) -> Int {
+        var best = 0
+        let framed = "(?i)(\\d{2,4})x(\\d{2,4})"
+        if let regex = try? NSRegularExpression(pattern: framed) {
+            let ns = text as NSString
+            for match in regex.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+                let width = Int(ns.substring(with: match.range(at: 1))) ?? 0
+                let height = Int(ns.substring(with: match.range(at: 2))) ?? 0
+                guard width >= 16, height >= 16, width <= 7680, height <= 4320 else { continue }
+                best = max(best, width * height)
+            }
+        }
+        if best > 0 { return best }
+        let named = "(?i)(?:^|(?<=[/_.:=-]))(144|240|360|480|540|576|720|960|1080|1440|2160)p?(?=$|[/_.?&#=-])"
+        guard let regex = try? NSRegularExpression(pattern: named) else { return 0 }
+        let ns = text as NSString
+        let known = [144: 192 * 144, 240: 426 * 240, 360: 640 * 360, 480: 854 * 480, 540: 960 * 540, 576: 1024 * 576, 720: 1280 * 720, 960: 1280 * 960, 1080: 1920 * 1080, 1440: 2560 * 1440, 2160: 3840 * 2160]
+        for match in regex.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            let height = Int(ns.substring(with: match.range(at: 1))) ?? 0
+            best = max(best, known[height] ?? 0)
+        }
+        return best
+    }
+
     private static func rewriteAttributes(_ line: String, base: URL, translate: (URL) -> String) -> String {
         var result = ""
         var rest = Substring(line)

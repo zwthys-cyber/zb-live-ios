@@ -72,6 +72,31 @@ final class PlaybackTests: XCTestCase {
         XCTAssertTrue(rewritten.contains("#EXTINF:2.000"))
     }
 
+    func testLowRenditionAddressOffersSharperSiblings() {
+        let url = URL(string: "https://cdn.example/live/480p/index.m3u8?token=ab")!
+        let upgrades = HLSRewriter.upgradeURLs(for: url)
+        XCTAssertTrue(upgrades.contains { $0.path == "/live/1080p/index.m3u8" && $0.query == "token=ab" })
+        XCTAssertTrue(upgrades.contains { $0.path == "/live/720p/index.m3u8" })
+        XCTAssertTrue(upgrades.contains { $0.path == "/live/auto/index.m3u8" })
+        XCTAssertFalse(upgrades.contains { $0.path.contains("480") })
+        XCTAssertTrue(HLSRewriter.upgradeURLs(for: URL(string: "https://cdn.example/live/master.m3u8")!).isEmpty)
+    }
+
+    func testSharpnessPrefersDeclaredFrameOverALowMediaPlaylist() {
+        let master = """
+        #EXTM3U
+        #EXT-X-STREAM-INF:BANDWIDTH=400000,RESOLUTION=426x240
+        240.m3u8
+        #EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080
+        1080.m3u8
+        """
+        XCTAssertGreaterThanOrEqual(HLSRewriter.sharpness(master), HLSRewriter.hdThreshold)
+        XCTAssertLessThan(HLSRewriter.sharpness("#EXTM3U\n#EXTINF:2.0,\nseg_480p.ts\n"), HLSRewriter.hdThreshold)
+        XCTAssertFalse(HLSRewriter.isDirectlyPlayable("#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"key\"\n"))
+        XCTAssertFalse(HLSRewriter.isDirectlyPlayable("#EXTM3U\n#EXT-X-MOUFLON:1\n"))
+        XCTAssertTrue(HLSRewriter.isDirectlyPlayable("#EXTM3U\n#EXTINF:2.0,\na.ts\n"))
+    }
+
     func testProgramTableMatchesMPEGCRC() {
         let packet = MPEGTS.pat(continuity: 0)
         let expected: [UInt8] = [0x47, 0x40, 0x00, 0x10, 0x00, 0x00, 0xB0, 0x0D, 0x00, 0x01, 0xC1, 0x00, 0x00, 0x00, 0x01, 0xF0, 0x00, 0x2A, 0xB1, 0x04, 0xB2]

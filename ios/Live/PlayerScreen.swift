@@ -10,15 +10,20 @@ final class PlaybackModel: NSObject, ObservableObject {
     @Published var buffering = true
     @Published var pipActive = false
     @Published var isReady = false
+    @Published var playbackStarted = false
     var ready: (() -> Void)?
     private var statusObservation: NSKeyValueObservation?
     private var timeObservation: NSKeyValueObservation?
+    private var bufferObservation: NSKeyValueObservation?
     private var failureObserver: NSObjectProtocol?
     private var didRecord = false
     private var playTask: Task<Void, Never>?
     private var tunnel: PlaybackTunnel?
     private var attemptFailed = false
     private var attemptError = ""
+    private var wantsPlay = false
+    private var holdPlayback = false
+    private var lastResume = Date.distantPast
 
     init(item: LiveItem) { self.item = item; super.init() }
 
@@ -27,6 +32,10 @@ final class PlaybackModel: NSObject, ObservableObject {
         tunnel?.stop()
         tunnel = nil
         clearObservations()
+        wantsPlay = true
+        holdPlayback = false
+        playbackStarted = false
+        lastResume = .distantPast
         error = nil; buffering = true; isReady = false; attemptFailed = false
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
@@ -36,6 +45,7 @@ final class PlaybackModel: NSObject, ObservableObject {
     }
 
     func stop() {
+        wantsPlay = false
         playTask?.cancel()
         playTask = nil
         tunnel?.stop()
@@ -44,6 +54,16 @@ final class PlaybackModel: NSObject, ObservableObject {
         player.replaceCurrentItem(with: nil)
         clearObservations()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    func holdForBackground() {
+        holdPlayback = true
+        player.pause()
+    }
+
+    func resumeAfterBackground() {
+        holdPlayback = false
+        resumeIfNeeded()
     }
 
     private func playCurrent() async {
@@ -56,14 +76,14 @@ final class PlaybackModel: NSObject, ObservableObject {
             return
         }
         var last = "此直播源暂时无法播放。"
-        for candidate in candidates {
+        for group in Self.grouped(candidates) {
             if Task.isCancelled { return }
             buffering = true
             let tunnel = PlaybackTunnel()
             self.tunnel?.stop()
             self.tunnel = tunnel
             do {
-                let local = try await tunnel.open(candidate, headers: item.headers ?? [:])
+                let local = try await tunnel.open(group, headers: item.headers ?? [:])
                 if Task.isCancelled { tunnel.stop(); return }
                 begin(local, headers: nil)
                 if await waitUntilReady() || Task.isCancelled { return }
@@ -73,9 +93,11 @@ final class PlaybackModel: NSObject, ObservableObject {
             } catch let tunnelError as TunnelError {
                 if case .notPlaylist = tunnelError {
                     tunnel.stop()
-                    begin(candidate.url, headers: item.headers)
-                    if await waitUntilReady() || Task.isCancelled { return }
-                    last = attemptError.isEmpty ? tunnelError.localizedDescription : attemptError
+                    for candidate in group {
+                        begin(candidate.url, headers: item.headers)
+                        if await waitUntilReady() || Task.isCancelled { return }
+                        last = attemptError.isEmpty ? tunnelError.localizedDescription : attemptError
+                    }
                 } else { last = tunnelError.localizedDescription }
             } catch let playbackError {
                 last = playbackError.localizedDescription
@@ -94,15 +116,33 @@ final class PlaybackModel: NSObject, ObservableObject {
         return []
     }
 
+    /// Consecutive HLS addresses are opened together so the sharper playlist can win. FLV stays a later fallback.
+    private static func grouped(_ candidates: [StreamCandidate]) -> [[StreamCandidate]] {
+        var groups: [[StreamCandidate]] = []
+        var hls: [StreamCandidate] = []
+        for candidate in candidates {
+            if candidate.kind == .hls { hls.append(candidate) }
+            else {
+                if !hls.isEmpty { groups.append(hls); hls = [] }
+                groups.append([candidate])
+            }
+        }
+        if !hls.isEmpty { groups.append(hls) }
+        return groups
+    }
+
     private func begin(_ url: URL, headers: [String: String]?) {
         clearObservations()
         attemptFailed = false
         attemptError = ""
         isReady = false
+        playbackStarted = false
+        lastResume = .distantPast
         buffering = true
         let asset = AVURLAsset(url: url, options: headers.map { ["AVURLAssetHTTPHeaderFieldsKey": $0] } ?? [:])
         let playerItem = AVPlayerItem(asset: asset)
-        player.automaticallyWaitsToMinimizeStalling = false
+        playerItem.preferredForwardBufferDuration = 2
+        player.automaticallyWaitsToMinimizeStalling = true
         player.replaceCurrentItem(with: playerItem)
         statusObservation = playerItem.observe(\.status, options: [.initial, .new]) { [weak self] value, _ in
             Task { @MainActor [weak self] in
@@ -110,6 +150,7 @@ final class PlaybackModel: NSObject, ObservableObject {
                 switch value.status {
                 case .readyToPlay:
                     self.isReady = true
+                    self.resumeIfNeeded()
                     if !self.didRecord { self.didRecord = true; self.ready?() }
                 case .failed:
                     self.attemptFailed = true
@@ -121,7 +162,25 @@ final class PlaybackModel: NSObject, ObservableObject {
             }
         }
         timeObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
-            Task { @MainActor [weak self] in self?.buffering = player.timeControlStatus == .waitingToPlayAtSpecifiedRate }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                switch player.timeControlStatus {
+                case .playing:
+                    self.playbackStarted = true
+                    self.buffering = false
+                case .waitingToPlayAtSpecifiedRate:
+                    self.buffering = true
+                case .paused:
+                    self.buffering = !self.wantsPlay || self.playbackStarted ? false : self.buffering
+                    self.resumeIfNeeded()
+                default:
+                    break
+                }
+            }
+        }
+        bufferObservation = playerItem.observe(\.isPlaybackLikelyToKeepUp, options: [.new]) { [weak self] item, _ in
+            guard item.isPlaybackLikelyToKeepUp else { return }
+            Task { @MainActor [weak self] in self?.resumeIfNeeded() }
         }
         failureObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: playerItem, queue: .main) { [weak self] note in
             Task { @MainActor [weak self] in
@@ -132,7 +191,26 @@ final class PlaybackModel: NSObject, ObservableObject {
                 if self.isReady { self.error = self.attemptError }
             }
         }
-        player.play()
+        resumeIfNeeded()
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            self.resumeIfNeeded()
+        }
+    }
+
+    /// The system player draws a center play button and drops the rate back to zero while the first buffer is empty.
+    /// Keep requesting playback until the first frame, then leave pause and resume to the viewer.
+    private func resumeIfNeeded() {
+        guard wantsPlay, !holdPlayback, !playbackStarted, !attemptFailed else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastResume) > 0.35 else { return }
+        lastResume = now
+        player.automaticallyWaitsToMinimizeStalling = true
+        if player.currentItem?.isPlaybackLikelyToKeepUp == true {
+            player.playImmediately(atRate: 1)
+        } else {
+            player.play()
+        }
     }
 
     private func waitUntilReady() async -> Bool {
@@ -149,6 +227,7 @@ final class PlaybackModel: NSObject, ObservableObject {
     private func clearObservations() {
         statusObservation?.invalidate(); statusObservation = nil
         timeObservation?.invalidate(); timeObservation = nil
+        bufferObservation?.invalidate(); bufferObservation = nil
         if let failureObserver { NotificationCenter.default.removeObserver(failureObserver) }
         failureObserver = nil
     }
@@ -205,7 +284,7 @@ struct PlayerScreen: View {
                 .accessibilityLabel("视频播放器")
                 .accessibilityValue(model.isReady ? "已就绪" : "连接中")
                 .accessibilityIdentifier("nativePlayer")
-            if model.buffering, model.error == nil {
+            if !model.playbackStarted, model.error == nil {
                 VStack(spacing: 12) { ProgressView().tint(.white); Text("正在连接直播源…").font(.caption).foregroundStyle(.white.opacity(0.7)) }
                     .padding(22).background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 18)).allowsHitTesting(false)
             }
@@ -230,7 +309,8 @@ struct PlayerScreen: View {
         .onAppear { model.ready = { library.record(item) }; model.start() }
         .onDisappear { model.stop() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background, !library.backgroundAudio, !model.pipActive { model.player.pause() }
+            if phase == .background, !library.backgroundAudio, !model.pipActive { model.holdForBackground() }
+            else if phase == .active { model.resumeAfterBackground() }
         }
     }
 }

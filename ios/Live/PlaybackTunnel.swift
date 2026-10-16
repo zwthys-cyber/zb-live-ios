@@ -41,15 +41,16 @@ final class PlaybackTunnel: @unchecked Sendable {
     }()
     private let pump = FLVPump()
 
-    func open(_ candidate: StreamCandidate, headers: [String: String]) async throws -> URL {
+    func open(_ candidates: [StreamCandidate], headers: [String: String]) async throws -> URL {
         self.headers = headers
         try startServer()
-        switch candidate.kind {
+        guard let first = candidates.first else { throw TunnelError.unavailable(0) }
+        switch first.kind {
         case .flv:
-            try await waitForFLV(candidate.url)
+            try await waitForFLV(first.url)
             return endpoint("live.m3u8")
         case .hls:
-            let loaded = try await loadPlaylist(candidate.url, allowUnwrap: true)
+            let loaded = try await sharpest(candidates.map(\.url))
             lock.sync {
                 playlistSource = loaded.source
                 playlistFinal = loaded.final
@@ -252,27 +253,121 @@ final class PlaybackTunnel: @unchecked Sendable {
         }
     }
 
-    private struct LoadedPlaylist { var data: Data; var source: URL; var final: URL }
+    private struct LoadedPlaylist: Sendable { var data: Data; var source: URL; var final: URL }
+
+    /// Pick the sharpest clear playlist. A single low rendition is compared with same-host upgrades and a clear embedded address.
+    private func sharpest(_ urls: [URL]) async throws -> LoadedPlaylist {
+        var best: LoadedPlaylist?
+        var bestScore = -1
+        var sawNotPlaylist = false
+        var last: Error = TunnelError.unavailable(0)
+        for url in urls {
+            do {
+                let loaded = try await loadBest(url)
+                let text = String(decoding: loaded.data, as: UTF8.self)
+                let value = HLSRewriter.isDirectlyPlayable(text) ? HLSRewriter.sharpness(text) : -1
+                if best == nil || value > bestScore {
+                    best = loaded
+                    bestScore = value
+                }
+                if bestScore >= 1920 * 1080 { break }
+            } catch let error as TunnelError {
+                if case .notPlaylist = error { sawNotPlaylist = true }
+                last = error
+            } catch {
+                last = error
+            }
+        }
+        if let best { return best }
+        throw sawNotPlaylist ? TunnelError.notPlaylist : last
+    }
+
+    private func loadBest(_ url: URL) async throws -> LoadedPlaylist {
+        let primary = try await resolve(url)
+        let text = String(decoding: primary.data, as: UTF8.self)
+        let playable = HLSRewriter.isDirectlyPlayable(text)
+        let primaryScore = playable ? HLSRewriter.sharpness(text) : -1
+        if playable, primaryScore >= HLSRewriter.hdThreshold { return primary }
+        var probes: [URL] = []
+        if let nested = PlaybackPlan.embeddedStream(url), nested != url, nested != primary.final { probes.append(nested) }
+        for candidate in HLSRewriter.upgradeURLs(for: primary.final) where candidate != primary.final && !probes.contains(candidate) {
+            probes.append(candidate)
+        }
+        guard !probes.isEmpty else { return primary }
+        var best = primary
+        var bestScore = primaryScore
+        for candidate in await fetchPlayable(Array(probes.prefix(4)), timeout: 4) {
+            let value = HLSRewriter.sharpness(String(decoding: candidate.data, as: UTF8.self))
+            if value > bestScore {
+                best = candidate
+                bestScore = value
+            }
+        }
+        return best
+    }
+
+    private func resolve(_ url: URL, allowEmbedded: Bool = true) async throws -> LoadedPlaylist {
+        do {
+            let (data, http) = try await fetch(url, timeout: 20)
+            if allowEmbedded, [401, 403, 404, 410, 451, 502].contains(http.statusCode), let nested = PlaybackPlan.embeddedStream(url), nested != url {
+                return try await resolve(nested, allowEmbedded: false)
+            }
+            guard (200..<300).contains(http.statusCode) else { throw TunnelError.unavailable(http.statusCode) }
+            guard Self.isPlaylist(data, mime: http.mimeType) else { throw TunnelError.notPlaylist }
+            return LoadedPlaylist(data: data, source: url, final: http.url ?? url)
+        } catch let error as TunnelError {
+            throw error
+        } catch {
+            if allowEmbedded, let nested = PlaybackPlan.embeddedStream(url), nested != url {
+                return try await resolve(nested, allowEmbedded: false)
+            }
+            throw error
+        }
+    }
+
+    private func fetchPlayable(_ urls: [URL], timeout: TimeInterval) async -> [LoadedPlaylist] {
+        let session = playlistSession
+        let requests = urls.map { authorized($0, timeout: timeout) }
+        return await withTaskGroup(of: LoadedPlaylist?.self) { group in
+            for request in requests {
+                group.addTask {
+                    guard let (data, response) = try? await session.data(for: request),
+                          let http = response as? HTTPURLResponse,
+                          (200..<300).contains(http.statusCode),
+                          data.count <= 20 * 1024 * 1024,
+                          let address = request.url,
+                          PlaybackTunnel.isPlaylist(data, mime: http.mimeType) else { return nil }
+                    let text = String(decoding: data, as: UTF8.self)
+                    guard HLSRewriter.isDirectlyPlayable(text) else { return nil }
+                    let final = http.url ?? address
+                    return LoadedPlaylist(data: data, source: address, final: final)
+                }
+            }
+            var found: [LoadedPlaylist] = []
+            for await item in group {
+                if let item { found.append(item) }
+            }
+            return found
+        }
+    }
 
     private func loadPlaylist(_ url: URL, allowUnwrap: Bool) async throws -> LoadedPlaylist {
-        let (data, http) = try await fetch(url)
-        if allowUnwrap, [401, 403, 404, 410, 451, 502].contains(http.statusCode), let nested = PlaybackPlan.embeddedStream(url), nested != url {
-            return try await loadPlaylist(nested, allowUnwrap: false)
-        }
+        if allowUnwrap { return try await resolve(url) }
+        let (data, http) = try await fetch(url, timeout: 20)
         guard (200..<300).contains(http.statusCode) else { throw TunnelError.unavailable(http.statusCode) }
         guard Self.isPlaylist(data, mime: http.mimeType) else { throw TunnelError.notPlaylist }
         return LoadedPlaylist(data: data, source: url, final: http.url ?? url)
     }
 
-    private func fetch(_ url: URL) async throws -> (Data, HTTPURLResponse) {
-        let (data, response) = try await playlistSession.data(for: authorized(url))
+    private func fetch(_ url: URL, timeout: TimeInterval) async throws -> (Data, HTTPURLResponse) {
+        let (data, response) = try await playlistSession.data(for: authorized(url, timeout: timeout))
         guard let http = response as? HTTPURLResponse else { throw TunnelError.unavailable(0) }
         guard data.count <= 20 * 1024 * 1024 else { throw TunnelError.unavailable(0) }
         return (data, http)
     }
 
-    private func authorized(_ url: URL) -> URLRequest {
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+    private func authorized(_ url: URL, timeout: TimeInterval = 20) -> URLRequest {
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
         var fields = headers
         if (fields["User-Agent"] ?? "").isEmpty {
             fields["User-Agent"] = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
