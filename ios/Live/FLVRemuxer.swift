@@ -187,14 +187,14 @@ final class FLVSegmenter {
             guard buffer.count >= 9, buffer.starts(with: Data([0x46, 0x4C, 0x56])) else { return }
             let offset = Int(buffer[5]) << 24 | Int(buffer[6]) << 16 | Int(buffer[7]) << 8 | Int(buffer[8])
             guard buffer.count >= max(offset, 9) else { return }
-            buffer.removeFirst(offset)
+            discard(offset)
             headerDone = true
             needPreviousSize = true
         }
         while true {
             if needPreviousSize {
                 guard buffer.count >= 4 else { return }
-                buffer.removeFirst(4)
+                discard(4)
                 needPreviousSize = false
             }
             guard buffer.count >= 11 else { return }
@@ -203,9 +203,16 @@ final class FLVSegmenter {
             let time = UInt32(buffer[7]) << 24 | UInt32(buffer[4]) << 16 | UInt32(buffer[5]) << 8 | UInt32(buffer[6])
             let payload = buffer.subdata(in: 11..<(11 + size))
             consume(type: buffer[0], time: time, payload: payload)
-            buffer.removeFirst(11 + size)
+            discard(11 + size)
             needPreviousSize = true
         }
+    }
+
+    /// `Data.removeFirst` keeps the old indices, so later `buffer[0]` traps. Copy the remainder back to a zero-based buffer.
+    private func discard(_ count: Int) {
+        guard count > 0 else { return }
+        buffer.removeFirst(count)
+        if buffer.startIndex != 0 { buffer = Data(buffer) }
     }
 
     private func consume(type: UInt8, time: UInt32, payload: Data) {
