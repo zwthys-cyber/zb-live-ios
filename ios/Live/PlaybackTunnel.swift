@@ -359,7 +359,7 @@ final class PlaybackTunnel: @unchecked Sendable {
         return LoadedPlaylist(data: data, source: url, final: http.url ?? url)
     }
 
-    private func fetch(_ url: URL, timeout: TimeInterval) async throws -> (Data, HTTPURLResponse) {
+    private func fetch(_ url: URL, timeout: TimeInterval = 20) async throws -> (Data, HTTPURLResponse) {
         let (data, response) = try await playlistSession.data(for: authorized(url, timeout: timeout))
         guard let http = response as? HTTPURLResponse else { throw TunnelError.unavailable(0) }
         guard data.count <= 20 * 1024 * 1024 else { throw TunnelError.unavailable(0) }
