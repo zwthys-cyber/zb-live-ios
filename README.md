@@ -16,7 +16,7 @@
 - 频道名称搜索、分组筛选、订阅合并刷新、删除频道。
 - 清除网页缓存与登录状态；本机保存收藏与资料。
 
-**移植范围：** 原服务的 `app_version`、`live/session`、`live/platforms`、`live/rooms`、`live/play` 已按原协议移植。生产接口已实际返回平台、房间和 HLS 视频分片，详细证据见 [私有接口恢复.md](私有接口恢复.md)。收藏直播房间会在每次打开时重新获取播放地址。原账户体系、Android 隧道及专有 RTC / 特殊加密播放器尚未移植；FLV / RTMP 或这些专有线路不能保证播放。没有使用 APK 中的测试账户凭据。
+**移植范围：** 原服务的 `app_version`、`live/session`、`live/platforms`、`live/rooms`、`live/play` 已按原协议移植。客户端按当前服务版本 `1.1.14`（build 124）标识。生产接口已实际返回平台、房间和 HLS 视频分片，详细证据见 [私有接口恢复.md](私有接口恢复.md)。收藏直播房间会在每次打开时重新获取播放地址。播放时锁定 HLS 最高清晰度；中转地址被拒绝时改走其中的真实清单；HTTP-FLV 在本机封装成 HLS 后播放。原账户体系、Android 隧道、RTMP 与 Agora 等专有 RTC 尚未移植。没有使用 APK 中的测试账户凭据。
 
 工程不依赖 Flutter、CocoaPods 或第三方 iOS 播放 SDK。原 APK、恢复的 DEX、Android 库和逆向结果包均未上传。
 

@@ -148,10 +148,10 @@ struct SubscriptionsView: View {
 struct AboutView: View {
     var body: some View {
         List {
-            Section("直播 · 1.0") {
+            Section("直播 · 1.1") {
                 Text("为 iOS 17.0 及以上系统重新编写的直播工具。")
                 Text("直播页连接原服务，读取在线平台、房间和播放线路。频道页的平台入口在内置浏览器中打开网站。可在网页内登录、观看和收藏当前页面，也可用右上角菜单在 Safari 中打开。")
-                Text("视频直链使用系统播放器，支持兼容的 HLS、MP4 等格式。需要特殊请求头、DRM、专用 SDK 或 FLV / RTMP 的直播可能无法直接播放，可改用平台网页。")
+                Text("视频会尽量使用最高清晰度。HLS 多码率只保留最高一档，HTTP-FLV 会在本机转成系统播放器可播的 HLS。RTMP、Agora 等专用线路仍需在平台网页观看。")
             }
             Section("频道列表") {
                 Text("M3U 示例")

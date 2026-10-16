@@ -15,33 +15,107 @@ final class PlaybackModel: NSObject, ObservableObject {
     private var timeObservation: NSKeyValueObservation?
     private var failureObserver: NSObjectProtocol?
     private var didRecord = false
+    private var playTask: Task<Void, Never>?
+    private var tunnel: PlaybackTunnel?
+    private var attemptFailed = false
+    private var attemptError = ""
 
     init(item: LiveItem) { self.item = item; super.init() }
 
     func start() {
-        statusObservation?.invalidate()
-        timeObservation?.invalidate()
-        if let failureObserver { NotificationCenter.default.removeObserver(failureObserver) }
-        error = nil; buffering = true; isReady = false
+        playTask?.cancel()
+        tunnel?.stop()
+        tunnel = nil
+        clearObservations()
+        error = nil; buffering = true; isReady = false; attemptFailed = false
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
             try AVAudioSession.sharedInstance().setActive(true)
         } catch { /* Player status reports playback failures; an audio-session warning needn't stop video. */ }
-        let asset = AVURLAsset(url: item.url, options: item.headers.map { ["AVURLAssetHTTPHeaderFieldsKey": $0] } ?? [:])
+        playTask = Task { await self.playCurrent() }
+    }
+
+    func stop() {
+        playTask?.cancel()
+        playTask = nil
+        tunnel?.stop()
+        tunnel = nil
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        clearObservations()
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    private func playCurrent() async {
+        let candidates = playbackCandidates
+        if candidates.isEmpty {
+            begin(item.url, headers: item.headers)
+            if await waitUntilReady() || Task.isCancelled { return }
+            error = attemptError.isEmpty ? "此直播源暂时无法播放。" : attemptError
+            buffering = false
+            return
+        }
+        var last = "此直播源暂时无法播放。"
+        for candidate in candidates {
+            if Task.isCancelled { return }
+            buffering = true
+            let tunnel = PlaybackTunnel()
+            self.tunnel?.stop()
+            self.tunnel = tunnel
+            do {
+                let local = try await tunnel.open(candidate, headers: item.headers ?? [:])
+                if Task.isCancelled { tunnel.stop(); return }
+                begin(local, headers: nil)
+                if await waitUntilReady() || Task.isCancelled { return }
+                last = attemptError.isEmpty ? last : attemptError
+            } catch is CancellationError {
+                tunnel.stop(); return
+            } catch let tunnelError as TunnelError {
+                if case .notPlaylist = tunnelError {
+                    tunnel.stop()
+                    begin(candidate.url, headers: item.headers)
+                    if await waitUntilReady() || Task.isCancelled { return }
+                    last = attemptError.isEmpty ? tunnelError.localizedDescription : attemptError
+                } else { last = tunnelError.localizedDescription }
+            } catch let playbackError {
+                last = playbackError.localizedDescription
+            }
+            tunnel.stop()
+        }
+        if !Task.isCancelled {
+            self.error = last
+            buffering = false
+        }
+    }
+
+    private var playbackCandidates: [StreamCandidate] {
+        if let streams = item.streams, !streams.isEmpty { return streams }
+        if let kind = StreamKind.classify(item.url) { return [StreamCandidate(url: item.url, kind: kind)] }
+        return []
+    }
+
+    private func begin(_ url: URL, headers: [String: String]?) {
+        clearObservations()
+        attemptFailed = false
+        attemptError = ""
+        isReady = false
+        buffering = true
+        let asset = AVURLAsset(url: url, options: headers.map { ["AVURLAssetHTTPHeaderFieldsKey": $0] } ?? [:])
         let playerItem = AVPlayerItem(asset: asset)
+        player.automaticallyWaitsToMinimizeStalling = false
         player.replaceCurrentItem(with: playerItem)
-        player.automaticallyWaitsToMinimizeStalling = true
         statusObservation = playerItem.observe(\.status, options: [.initial, .new]) { [weak self] value, _ in
             Task { @MainActor [weak self] in
-                guard let self else { return }
-                guard self.player.currentItem === value else { return }
+                guard let self, self.player.currentItem === value else { return }
                 switch value.status {
                 case .readyToPlay:
                     self.isReady = true
                     if !self.didRecord { self.didRecord = true; self.ready?() }
                 case .failed:
+                    self.attemptFailed = true
+                    self.attemptError = value.error?.localizedDescription ?? "此直播源暂时无法播放。"
                     self.buffering = false
-                    self.error = value.error?.localizedDescription ?? "此直播源暂时无法播放。"
+                    if self.isReady { self.error = self.attemptError }
                 default: break
                 }
             }
@@ -51,21 +125,32 @@ final class PlaybackModel: NSObject, ObservableObject {
         }
         failureObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: playerItem, queue: .main) { [weak self] note in
             Task { @MainActor [weak self] in
-                self?.error = (note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)?.localizedDescription ?? "播放中断，请重试。"
-                self?.buffering = false
+                guard let self else { return }
+                self.attemptFailed = true
+                self.attemptError = (note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)?.localizedDescription ?? "播放中断，请重试。"
+                self.buffering = false
+                if self.isReady { self.error = self.attemptError }
             }
         }
         player.play()
     }
 
-    func stop() {
-        player.pause()
-        player.replaceCurrentItem(with: nil)
+    private func waitUntilReady() async -> Bool {
+        let deadline = Date().addingTimeInterval(18)
+        while Date() < deadline {
+            if Task.isCancelled { return false }
+            if isReady { return true }
+            if attemptFailed { return false }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+        return isReady
+    }
+
+    private func clearObservations() {
         statusObservation?.invalidate(); statusObservation = nil
         timeObservation?.invalidate(); timeObservation = nil
         if let failureObserver { NotificationCenter.default.removeObserver(failureObserver) }
         failureObserver = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 }
 

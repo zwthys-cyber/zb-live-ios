@@ -50,7 +50,7 @@ final class LiveUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["还没有收藏"].waitForExistence(timeout: 3))
         app.tabBars.buttons["我的"].tap()
         app.buttons["aboutLink"].tap()
-        XCTAssertTrue(app.staticTexts["直播 · 1.0"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["直播 · 1.1"].waitForExistence(timeout: 3))
     }
 
     func testInvalidURLStaysInForm() throws {
