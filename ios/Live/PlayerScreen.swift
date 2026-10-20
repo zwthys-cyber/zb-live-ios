@@ -154,7 +154,7 @@ final class PlaybackModel: NSObject, ObservableObject {
                     if !self.didRecord { self.didRecord = true; self.ready?() }
                 case .failed:
                     self.attemptFailed = true
-                    self.attemptError = value.error?.localizedDescription ?? "此直播源暂时无法播放。"
+                    self.attemptError = self.tunnel?.failureDescription ?? value.error?.localizedDescription ?? "此直播源暂时无法播放。"
                     self.buffering = false
                     if self.isReady { self.error = self.attemptError }
                 default: break
@@ -186,7 +186,7 @@ final class PlaybackModel: NSObject, ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.attemptFailed = true
-                self.attemptError = (note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)?.localizedDescription ?? "播放中断，请重试。"
+                self.attemptError = self.tunnel?.failureDescription ?? (note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)?.localizedDescription ?? "播放中断，请重试。"
                 self.buffering = false
                 if self.isReady { self.error = self.attemptError }
             }

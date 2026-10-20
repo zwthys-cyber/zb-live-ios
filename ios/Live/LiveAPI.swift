@@ -6,11 +6,16 @@ import CommonCrypto
 struct LiveAPIConfiguration: Sendable {
     var bases: [URL]
     var publicKeyDER: Data
+    var stripchatOrigins: [URL] = StripchatPlayback.origins
     static let production = LiveAPIConfiguration(
         bases: ["https://cbg.saaafcsdafvsdgredhdfbxcvxzcvsds.xyz", "https://cbg.saxcvcvnmliotergsdfsdv.xyz"].compactMap(URL.init(string:)),
         publicKeyDER: Data(base64Encoded: "MIIBCgKCAQEAn3e54Fm9rWz7GLQx50UpQEtZeylR/eATPCq32CG8WPqkI0s6+vQmyXCpYGl6QYZScGghl0/HBwrMcBwb4ea6LQw3YpQ0lYA2TT8WnvCF9gYnCcytzhL1EjdTmwWeSmQ6DTPpSUsmb1ZDaa2CVvs9z/ExiuQiqXsfiUfFmzBxrb07UXcorBNXK8TUSdNK7arxEldnxv6SG9knZkPs52LSCu0pHB2QVQlC4IkVIUFyVwQcQh6qXKchXf59e3DPaqIgukirg/6mZYVAgboh9DRAp326qcRTTnEjJIFReULntVqkOsvePfbOwmxoUuWaXXdPfn/Cg/goY1NsocLqX5MYLQIDAQAB")!)
     // This public key has a matching, deliberately public test key in tests/Fixtures.
-    static let fixture = LiveAPIConfiguration(bases: [URL(string: "http://127.0.0.1:8765")!], publicKeyDER: Data(base64Encoded: "MIIBCgKCAQEA8KPa5oS8mltFx2efgND/udZHIH3aevrcDJAJvRg7LWRX8Xcl2Wcn2M/y7QsX2gxZp2CsudvIdfDLOnBlmVDr+GSWzPFuwy/pwePjp7I+wiYfXCHIIH1aVFT08Qo8BvVaQoYbQjOcHGy1rnsOzMG0tlcyD+mq56HRTDmUc3+fruApaOsPEB6nVbm77jIwWfBCbpjzSqNn5DtWScNlQ1w2h3elLLA8Vrz+Bk8j00kiV/IB72mOMXStBXu2Vc8xS/bY/AtIXd872zeyhaXvrT7LzexC+VRRntWUuT/wSB0V8/jjuXFfTfb3qCPFvu1slIFjgDPWr0qSHaOKLoY1AozMkwIDAQAB")!)
+    static let fixture: LiveAPIConfiguration = {
+        var value = LiveAPIConfiguration(bases: [URL(string: "http://127.0.0.1:8765")!], publicKeyDER: Data(base64Encoded: "MIIBCgKCAQEA8KPa5oS8mltFx2efgND/udZHIH3aevrcDJAJvRg7LWRX8Xcl2Wcn2M/y7QsX2gxZp2CsudvIdfDLOnBlmVDr+GSWzPFuwy/pwePjp7I+wiYfXCHIIH1aVFT08Qo8BvVaQoYbQjOcHGy1rnsOzMG0tlcyD+mq56HRTDmUc3+fruApaOsPEB6nVbm77jIwWfBCbpjzSqNn5DtWScNlQ1w2h3elLLA8Vrz+Bk8j00kiV/IB72mOMXStBXu2Vc8xS/bY/AtIXd872zeyhaXvrT7LzexC+VRRntWUuT/wSB0V8/jjuXFfTfb3qCPFvu1slIFjgDPWr0qSHaOKLoY1AozMkwIDAQAB")!)
+        value.stripchatOrigins = [URL(string: "http://127.0.0.1:8765/sc")!]
+        return value
+    }()
 }
 
 enum LiveAPIError: LocalizedError {
@@ -263,11 +268,16 @@ actor LiveAPI {
         guard let data = response["data"] as? [String: Any] else { throw LiveAPIError.invalidResponse }
         // The original service wraps HLS through live/hls; resolve a fresh URL on
         // every open, including a saved favorite whose earlier stream expired.
-        let streams = PlaybackPlan.streams(from: data)
+        let scStreams = StripchatPlayback.streams(from: data, origins: configuration.stripchatOrigins)
+        let streams = scStreams ?? PlaybackPlan.streams(from: data)
         guard let url = streams.first?.url else { throw LiveAPIError.noStream }
         var headers = data["headers"] as? [String: String] ?? [:]
         if let agent = data["user_agent"] as? String, !agent.isEmpty { headers["User-Agent"] = agent }
         if let referer = data["referer"] as? String, !referer.isEmpty { headers["Referer"] = referer }
+        if scStreams != nil {
+            headers["Origin"] = "https://stripchat.com"
+            headers["Referer"] = "https://stripchat.com/"
+        }
         return LiveItem(name: item.name, url: url, kind: .media, group: item.group, headers: headers.isEmpty ? nil : headers, roomID: id, streams: streams)
     }
     private func authenticated(_ route: String, params: [String: String] = [:]) async throws -> [String: Any] {

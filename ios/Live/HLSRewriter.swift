@@ -1,6 +1,26 @@
 import Foundation
 
 enum HLSRewriter {
+    struct Variant {
+        let info: String
+        let url: URL
+    }
+
+    /// Inspect declared variants, including portrait/source and resolutions above 1080p.
+    static func highestVariant(in playlist: String, base: URL) -> Variant? {
+        let lines = playlist.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        var variants: [Variant] = []
+        for (index, line) in lines.enumerated() where line.hasPrefix("#EXT-X-STREAM-INF:") {
+            guard index + 1 < lines.count, !lines[index + 1].hasPrefix("#"),
+                  let url = resolve(lines[index + 1], base: base) else { continue }
+            variants.append(Variant(info: line, url: url))
+        }
+        let video = variants.filter { isVideo($0.info) }
+        return (video.isEmpty ? variants : video).max {
+            (pixels($0.info), bandwidth($0.info)) < (pixels($1.info), bandwidth($1.info))
+        }
+    }
+
     /// Keep the sharpest video variant and the audio group it references.
     /// Media playlists lose low-latency partials so AVPlayer can play the full segments.
     static func rewrite(_ playlist: String, base: URL, translate: (URL) -> String) -> String {

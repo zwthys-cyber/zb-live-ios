@@ -26,6 +26,9 @@ final class PlaybackTunnel: @unchecked Sendable {
     private var playlistSource: URL?
     private var playlistFinal: URL?
     private var warmed: Data?
+    private var stripchatMaster: URL?
+    private var latestFailure: String?
+    private let mouflonKeys: [String: String]
     private let segmenter = FLVSegmenter()
     private var flvStatus: Int?
     private var flvError: Error?
@@ -41,6 +44,12 @@ final class PlaybackTunnel: @unchecked Sendable {
     }()
     private let pump = FLVPump()
 
+    init(mouflonKeys: [String: String] = ProcessInfo.processInfo.arguments.contains("--ui-testing") ? MouflonPlaylist.fixtureKeys : MouflonPlaylist.publicKeys) {
+        self.mouflonKeys = mouflonKeys
+    }
+
+    var failureDescription: String? { lock.sync { latestFailure } }
+
     func open(_ candidates: [StreamCandidate], headers: [String: String]) async throws -> URL {
         self.headers = headers
         try startServer()
@@ -52,6 +61,16 @@ final class PlaybackTunnel: @unchecked Sendable {
         case .hls:
             let loaded = try await sharpest(candidates.map(\.url))
             lock.sync {
+                playlistSource = loaded.source
+                playlistFinal = loaded.final
+                warmed = loaded.data
+            }
+            return endpoint("root.m3u8")
+        case .stripchat:
+            let master = StripchatPlayback.originalMaster(for: first.url) ?? first.url
+            let loaded = try await loadStripchat(master)
+            lock.sync {
+                stripchatMaster = master
                 playlistSource = loaded.source
                 playlistFinal = loaded.final
                 warmed = loaded.data
@@ -165,6 +184,7 @@ final class PlaybackTunnel: @unchecked Sendable {
                 write(fd, status: 200, type: "video/MP2T", body: data, head: method == "HEAD", header: request)
             } else if route == "root.m3u8" {
                 let playlist = try await currentPlaylist()
+                lock.sync { latestFailure = nil }
                 write(fd, status: 200, type: "application/vnd.apple.mpegurl", body: Data(playlist.utf8), head: method == "HEAD", header: request)
             } else if route == "p", parts.count >= 4, let upstream = decode(parts[3]) {
                 let (data, http) = try await fetch(upstream)
@@ -181,16 +201,17 @@ final class PlaybackTunnel: @unchecked Sendable {
                 write(fd, status: 404, type: "text/plain", body: Data("unknown".utf8), head: method == "HEAD")
             }
         } catch {
+            lock.sync { latestFailure = error.localizedDescription }
             write(fd, status: 502, type: "text/plain", body: Data((error.localizedDescription).utf8), head: method == "HEAD")
         }
     }
 
     private func currentPlaylist() async throws -> String {
-        let (cached, final, source): (Data?, URL?, URL?) = lock.sync {
+        let (cached, final, source, scMaster): (Data?, URL?, URL?, URL?) = lock.sync {
             let cached = warmed
             let final = playlistFinal
             warmed = nil
-            return (cached, final, playlistSource)
+            return (cached, final, playlistSource, stripchatMaster)
         }
         let data: Data
         let base: URL
@@ -198,7 +219,20 @@ final class PlaybackTunnel: @unchecked Sendable {
             data = cached
             base = final
         } else if let source {
-            let loaded = try await loadPlaylist(source, allowUnwrap: false)
+            let loaded: LoadedPlaylist
+            if let scMaster {
+                do { loaded = try await loadStripchatMedia(source) }
+                catch is CancellationError { throw CancellationError() }
+                catch {
+                    // A retired descriptor can return an HTTP-200 advert. Refresh the
+                    // master and renegotiate once; never feed that advert to AVPlayer.
+                    loaded = try await loadStripchat(scMaster)
+                    lock.sync {
+                        playlistSource = loaded.source
+                        playlistFinal = loaded.final
+                    }
+                }
+            } else { loaded = try await loadPlaylist(source, allowUnwrap: false) }
             data = loaded.data
             base = loaded.final
         } else {
@@ -254,6 +288,29 @@ final class PlaybackTunnel: @unchecked Sendable {
     }
 
     private struct LoadedPlaylist: Sendable { var data: Data; var source: URL; var final: URL }
+
+    private func loadStripchat(_ master: URL) async throws -> LoadedPlaylist {
+        let loaded = try await loadPlaylist(master, allowUnwrap: false)
+        let text = String(decoding: loaded.data, as: UTF8.self)
+        let scheme = try MouflonPlaylist.negotiate(text, keys: mouflonKeys)
+        guard let best = HLSRewriter.highestVariant(in: text, base: loaded.final) else { throw StripchatPlaybackError.noVariant }
+        let schemes = MouflonPlaylist.schemes(in: text).filter { mouflonKeys[$0.keyID] != nil }
+        let choices: [MouflonPlaylist.Scheme?] = schemes.isEmpty ? [scheme] : schemes.prefix(3).map { Optional($0) }
+        for (index, choice) in choices.enumerated() {
+            let url = try MouflonPlaylist.applying(choice, to: best.url)
+            do { return try await loadStripchatMedia(url) }
+            catch StripchatPlaybackError.unavailable where index + 1 < choices.count { continue }
+        }
+        throw StripchatPlaybackError.unavailable
+    }
+
+    private func loadStripchatMedia(_ url: URL) async throws -> LoadedPlaylist {
+        let loaded = try await loadPlaylist(url, allowUnwrap: false)
+        let text = String(decoding: loaded.data, as: UTF8.self)
+        let decoded = try MouflonPlaylist.decode(text, base: loaded.final, keys: mouflonKeys)
+        guard decoded.contains("#EXTINF:") else { throw StripchatPlaybackError.noVariant }
+        return LoadedPlaylist(data: Data(decoded.utf8), source: loaded.source, final: loaded.final)
+    }
 
     /// Pick the sharpest clear playlist. A single low rendition is compared with same-host upgrades and a clear embedded address.
     private func sharpest(_ urls: [URL]) async throws -> LoadedPlaylist {

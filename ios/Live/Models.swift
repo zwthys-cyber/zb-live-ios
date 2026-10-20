@@ -4,9 +4,11 @@ import CryptoKit
 enum StreamKind: String, Codable, Hashable, Sendable {
     case hls
     case flv
+    case stripchat
 
     /// Progressive files play directly. FLV is remuxed, and every other media address is treated as HLS.
     static func classify(_ url: URL) -> StreamKind? {
+        if StripchatPlayback.originalMaster(for: url) != nil { return .stripchat }
         let extensionName = url.pathExtension.lowercased()
         if ["mp4", "m4v", "mov", "mp3", "aac"].contains(extensionName) { return nil }
         if extensionName == "flv" || url.path.lowercased().hasSuffix("/flv") { return .flv }
