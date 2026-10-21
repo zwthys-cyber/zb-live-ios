@@ -20,7 +20,7 @@ jobs:
     # The generic macos-15 label uses the capacity-constrained arm64 pool.
     # Intel hosts can still build the app's arm64 iPhone binary and run iOS tests.
     runs-on: macos-15-intel
-    timeout-minutes: 35
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -29,6 +29,17 @@ jobs:
 
       - name: Generate Xcode project
         run: xcodegen generate
+
+      - name: Build and package TrollStore IPA
+        run: bash scripts/build_ipa.sh
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Live-iOS17-TrollStore
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Select simulator
         run: |
@@ -40,11 +51,19 @@ jobs:
               devices = json.load(f)['devices']
           iphones = [d for runtime, entries in devices.items() if '.iOS-' in runtime for d in entries if d['name'].startswith('iPhone') and d.get('isAvailable')]
           assert iphones, 'No available iPhone simulator'
-          chosen = next((d for d in iphones if d['state'] == 'Booted'), iphones[0])
+          # A smaller screen keeps accessibility snapshots responsive on Intel VMs.
+          preferred = next((d for d in iphones if d['name'] == 'iPhone SE (3rd generation)'), iphones[0])
+          chosen = next((d for d in iphones if d['state'] == 'Booted'), preferred)
           with open(os.environ['GITHUB_ENV'], 'a') as f:
               f.write('LIVE_SIMULATOR=' + chosen['udid'] + '\n')
           print(chosen['name'], chosen['udid'])
           PY
+
+      - name: Boot simulator
+        timeout-minutes: 5
+        run: |
+          xcrun simctl boot "$LIVE_SIMULATOR" 2>/dev/null || true
+          xcrun simctl bootstatus "$LIVE_SIMULATOR" -b
 
       - name: Run parser, persistence and UI tests
         run: |
@@ -58,19 +77,6 @@ jobs:
             -destination-timeout 120 -derivedDataPath build/tests \
             -resultBundlePath build/TestResults.xcresult -parallel-testing-enabled NO \
             CODE_SIGNING_ALLOWED=NO test 2>&1 | tee build/test.log
-
-      # Home is captured by XCTest and retained in TestResults.xcresult. Xcode owns
-      # its simulator clones; no second launch against the shutdown template is needed.
-      - name: Build and package TrollStore IPA
-        run: bash scripts/build_ipa.sh
-
-      - name: Upload IPA
-        uses: actions/upload-artifact@v4
-        with:
-          name: Live-iOS17-TrollStore
-          path: dist/*
-          if-no-files-found: error
-          retention-days: 30
 
       - name: Upload test evidence
         if: always()
