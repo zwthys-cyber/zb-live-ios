@@ -6,11 +6,16 @@ import CommonCrypto
 struct LiveAPIConfiguration: Sendable {
     var bases: [URL]
     var publicKeyDER: Data
+    var stripchatOrigins: [URL] = StripchatPlayback.origins
     static let production = LiveAPIConfiguration(
         bases: ["https://cbg.saaafcsdafvsdgredhdfbxcvxzcvsds.xyz", "https://cbg.saxcvcvnmliotergsdfsdv.xyz"].compactMap(URL.init(string:)),
         publicKeyDER: Data(base64Encoded: "MIIBCgKCAQEAn3e54Fm9rWz7GLQx50UpQEtZeylR/eATPCq32CG8WPqkI0s6+vQmyXCpYGl6QYZScGghl0/HBwrMcBwb4ea6LQw3YpQ0lYA2TT8WnvCF9gYnCcytzhL1EjdTmwWeSmQ6DTPpSUsmb1ZDaa2CVvs9z/ExiuQiqXsfiUfFmzBxrb07UXcorBNXK8TUSdNK7arxEldnxv6SG9knZkPs52LSCu0pHB2QVQlC4IkVIUFyVwQcQh6qXKchXf59e3DPaqIgukirg/6mZYVAgboh9DRAp326qcRTTnEjJIFReULntVqkOsvePfbOwmxoUuWaXXdPfn/Cg/goY1NsocLqX5MYLQIDAQAB")!)
     // This public key has a matching, deliberately public test key in tests/Fixtures.
-    static let fixture = LiveAPIConfiguration(bases: [URL(string: "http://127.0.0.1:8765")!], publicKeyDER: Data(base64Encoded: "MIIBCgKCAQEA8KPa5oS8mltFx2efgND/udZHIH3aevrcDJAJvRg7LWRX8Xcl2Wcn2M/y7QsX2gxZp2CsudvIdfDLOnBlmVDr+GSWzPFuwy/pwePjp7I+wiYfXCHIIH1aVFT08Qo8BvVaQoYbQjOcHGy1rnsOzMG0tlcyD+mq56HRTDmUc3+fruApaOsPEB6nVbm77jIwWfBCbpjzSqNn5DtWScNlQ1w2h3elLLA8Vrz+Bk8j00kiV/IB72mOMXStBXu2Vc8xS/bY/AtIXd872zeyhaXvrT7LzexC+VRRntWUuT/wSB0V8/jjuXFfTfb3qCPFvu1slIFjgDPWr0qSHaOKLoY1AozMkwIDAQAB")!)
+    static let fixture: LiveAPIConfiguration = {
+        var value = LiveAPIConfiguration(bases: [URL(string: "http://127.0.0.1:8765")!], publicKeyDER: Data(base64Encoded: "MIIBCgKCAQEA8KPa5oS8mltFx2efgND/udZHIH3aevrcDJAJvRg7LWRX8Xcl2Wcn2M/y7QsX2gxZp2CsudvIdfDLOnBlmVDr+GSWzPFuwy/pwePjp7I+wiYfXCHIIH1aVFT08Qo8BvVaQoYbQjOcHGy1rnsOzMG0tlcyD+mq56HRTDmUc3+fruApaOsPEB6nVbm77jIwWfBCbpjzSqNn5DtWScNlQ1w2h3elLLA8Vrz+Bk8j00kiV/IB72mOMXStBXu2Vc8xS/bY/AtIXd872zeyhaXvrT7LzexC+VRRntWUuT/wSB0V8/jjuXFfTfb3qCPFvu1slIFjgDPWr0qSHaOKLoY1AozMkwIDAQAB")!)
+        value.stripchatOrigins = [URL(string: "http://127.0.0.1:8765/sc")!]
+        return value
+    }()
 }
 
 enum LiveAPIError: LocalizedError {
@@ -172,6 +177,37 @@ struct RemoteRoom: Identifiable, Sendable {
     }
 }
 
+enum PlaybackPlan {
+    static let clientVersion = "1.1.14"
+    static let clientBuild = "124"
+
+    static func streams(from data: [String: Any]) -> [StreamCandidate] {
+        var result: [StreamCandidate] = []
+        func add(_ raw: String?, kind: StreamKind?) {
+            guard let raw, !raw.isEmpty, let url = try? LinkValidator.parse(raw) else { return }
+            guard !result.contains(where: { $0.url == url }) else { return }
+            result.append(StreamCandidate(url: url, kind: kind ?? StreamKind.classify(url) ?? .hls))
+        }
+        for key in ["cdn_hls_url", "hls_url", "play_url", "url"] { add(data[key] as? String, kind: nil) }
+        add(data["flv_url"] as? String, kind: .flv)
+        if let relay = data["rtmp_url"] as? String, relay.hasPrefix("http://") || relay.hasPrefix("https://") { add(relay, kind: .flv) }
+        return result
+    }
+
+    /// Edge relays wrap the real playlist in `u`. A forbidden relay can still be played from that address.
+    static func embeddedStream(_ url: URL) -> URL? {
+        guard let query = url.query else { return nil }
+        for part in query.split(separator: "&") {
+            let pair = part.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            guard pair.count == 2, pair[0] == "u" else { continue }
+            let value = pair[1].removingPercentEncoding ?? pair[1]
+            guard let nested = URL(string: value), let scheme = nested.scheme?.lowercased(), ["http", "https"].contains(scheme), nested.host != nil else { return nil }
+            return nested
+        }
+        return nil
+    }
+}
+
 actor LiveAPI {
     static let shared = LiveAPI(configuration: ProcessInfo.processInfo.arguments.contains("--ui-testing") ? .fixture : .production)
     let configuration: LiveAPIConfiguration
@@ -232,13 +268,17 @@ actor LiveAPI {
         guard let data = response["data"] as? [String: Any] else { throw LiveAPIError.invalidResponse }
         // The original service wraps HLS through live/hls; resolve a fresh URL on
         // every open, including a saved favorite whose earlier stream expired.
-        let urls = ["cdn_hls_url", "hls_url", "play_url", "url"].compactMap { data[$0] as? String }.filter { !$0.isEmpty }
-        guard let url = urls.compactMap({ try? LinkValidator.parse($0) }).first,
-              !["flv", "rtmp"].contains(url.pathExtension.lowercased()) else { throw LiveAPIError.noStream }
+        let scStreams = StripchatPlayback.streams(from: data, origins: configuration.stripchatOrigins)
+        let streams = scStreams ?? PlaybackPlan.streams(from: data)
+        guard let url = streams.first?.url else { throw LiveAPIError.noStream }
         var headers = data["headers"] as? [String: String] ?? [:]
         if let agent = data["user_agent"] as? String, !agent.isEmpty { headers["User-Agent"] = agent }
         if let referer = data["referer"] as? String, !referer.isEmpty { headers["Referer"] = referer }
-        return LiveItem(name: item.name, url: url, kind: .media, group: item.group, headers: headers.isEmpty ? nil : headers, roomID: id)
+        if scStreams != nil {
+            headers["Origin"] = "https://stripchat.com"
+            headers["Referer"] = "https://stripchat.com/"
+        }
+        return LiveItem(name: item.name, url: url, kind: .media, group: item.group, headers: headers.isEmpty ? nil : headers, roomID: id, streams: streams)
     }
     private func authenticated(_ route: String, params: [String: String] = [:]) async throws -> [String: Any] {
         do { return try await request(route, params: params) }
@@ -259,7 +299,7 @@ actor LiveAPI {
                 var request = URLRequest(url: address, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 25)
                 let timestamp = String(Int(Date().timeIntervalSince1970))
                 let nonce = try LiveAPICrypto.random(16).map { String(format: "%02x", $0) }.joined()
-                request.allHTTPHeaderFields = ["X-App-Id": "dongni", "X-App-Version": "9.9.9", "X-App-Build": "999", "User-Agent": "Dart/3.11 (dart:io)", "X-Timestamp": timestamp, "X-Nonce": nonce, "X-Sign": LiveAPICrypto.signature(route: route, timestamp: timestamp, nonce: nonce), "X-Device-Id": device]
+                request.allHTTPHeaderFields = ["X-App-Id": "dongni", "X-App-Version": PlaybackPlan.clientVersion, "X-App-Build": PlaybackPlan.clientBuild, "User-Agent": "Dart/3.11 (dart:io)", "X-Timestamp": timestamp, "X-Nonce": nonce, "X-Sign": LiveAPICrypto.signature(route: route, timestamp: timestamp, nonce: nonce), "X-Device-Id": device]
                 if let publicEnvelope { request.setValue(publicEnvelope, forHTTPHeaderField: "X-Session-PubEnc") }
                 if !ticket.isEmpty { request.setValue(ticket, forHTTPHeaderField: "X-Access-Ticket") }
                 if !token.isEmpty { request.setValue(token, forHTTPHeaderField: "X-Live-Session") }

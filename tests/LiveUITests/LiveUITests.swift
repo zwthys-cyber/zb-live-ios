@@ -50,7 +50,30 @@ final class LiveUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["还没有收藏"].waitForExistence(timeout: 3))
         app.tabBars.buttons["我的"].tap()
         app.buttons["aboutLink"].tap()
-        XCTAssertTrue(app.staticTexts["直播 · 1.0"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["直播 · 1.2"].waitForExistence(timeout: 3))
+    }
+
+    func testSCOriginalQualityNegotiationDecodingAndFavoriteReopen() throws {
+        let app = launch()
+        app.tabBars.buttons["直播"].tap()
+        let platform = app.buttons["platform_11"]
+        XCTAssertTrue(platform.waitForExistence(timeout: 20))
+        platform.tap()
+        let room = app.buttons["room_11_90001"]
+        XCTAssertTrue(room.waitForExistence(timeout: 15))
+        room.tap()
+        let player = app.descendants(matching: .any).matching(identifier: "nativePlayer").firstMatch
+        XCTAssertTrue(player.waitForExistence(timeout: 20))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "已就绪"), object: player)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 25), .completed)
+        app.buttons["收藏视频"].tap()
+        app.buttons["关闭播放"].tap()
+        app.tabBars.buttons["收藏"].tap()
+        XCTAssertTrue(app.staticTexts["SC 原画测试"].waitForExistence(timeout: 5))
+        app.staticTexts["SC 原画测试"].tap()
+        XCTAssertTrue(player.waitForExistence(timeout: 20))
+        let reopened = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "已就绪"), object: player)
+        XCTAssertEqual(XCTWaiter.wait(for: [reopened], timeout: 25), .completed)
     }
 
     func testInvalidURLStaysInForm() throws {

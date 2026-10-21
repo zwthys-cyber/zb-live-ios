@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import os
 from fixture_api import serve as serve_api
+from fixture_sc import serve as serve_sc
 
 ROOT = Path(__file__).resolve().parent.parent / 'tests/Fixtures'
 
@@ -13,6 +14,8 @@ class Handler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
     def do_GET(self):
+        if serve_sc(self, ROOT):
+            return
         if serve_api(self):
             return
         requested = Path(self.translate_path(self.path)).resolve()

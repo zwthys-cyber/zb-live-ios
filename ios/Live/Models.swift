@@ -1,6 +1,26 @@
 import Foundation
 import CryptoKit
 
+enum StreamKind: String, Codable, Hashable, Sendable {
+    case hls
+    case flv
+    case stripchat
+
+    /// Progressive files play directly. FLV is remuxed, and every other media address is treated as HLS.
+    static func classify(_ url: URL) -> StreamKind? {
+        if StripchatPlayback.originalMaster(for: url) != nil { return .stripchat }
+        let extensionName = url.pathExtension.lowercased()
+        if ["mp4", "m4v", "mov", "mp3", "aac"].contains(extensionName) { return nil }
+        if extensionName == "flv" || url.path.lowercased().hasSuffix("/flv") { return .flv }
+        return .hls
+    }
+}
+
+struct StreamCandidate: Codable, Hashable, Sendable {
+    var url: URL
+    var kind: StreamKind
+}
+
 enum LinkKind: String, Codable, CaseIterable, Sendable {
     case web
     case media
@@ -20,17 +40,19 @@ struct LiveItem: Codable, Identifiable, Hashable, Sendable {
     var group: String
     var headers: [String: String]?
     var roomID: String?
+    var streams: [StreamCandidate]?
 
     var id: String { SHA256.hash(data: Data((roomID.map { "room:" + $0 } ?? url.absoluteString).utf8)).map { String(format: "%02x", $0) }.joined() }
     var host: String { url.host ?? "" }
 
-    init(name: String, url: URL, kind: LinkKind? = nil, group: String = "", headers: [String: String]? = nil, roomID: String? = nil) {
+    init(name: String, url: URL, kind: LinkKind? = nil, group: String = "", headers: [String: String]? = nil, roomID: String? = nil, streams: [StreamCandidate]? = nil) {
         self.name = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? (url.host ?? "直播") : name
         self.url = url
         self.kind = kind ?? LinkKind.detect(url)
         self.group = group
         self.headers = headers
         self.roomID = roomID
+        self.streams = streams
     }
 }
 

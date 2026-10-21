@@ -58,6 +58,8 @@ def serve(handler):
         ticket = hmac.new(b'fixture-ticket', device.encode(), hashlib.sha256).hexdigest()
         origin = 'http://127.0.0.1:' + str(handler.server.server_port)
         room = {'id': '38_fixture', 'name': '测试直播间', 'platform_id': 38, 'platform_code': 'fixture', 'watched': 12, 'cdn_hls_url': origin + '/sample.m3u8'}
+        sc_room = {'id': '11_90001', 'name': 'SC 原画测试', 'platform_id': 11, 'platform_code': 'sc_fixture', 'chat_room_id': 90001,
+                   'cdn_hls_url': origin + '/sc/low.m3u8'}
         if route == 'app_version':
             respond(handler, 0, {'latest_version': '1.1.13', 'latest_build': 123}, ticket=ticket)
         elif route == 'live/session':
@@ -70,11 +72,15 @@ def serve(handler):
             assert handler.headers.get('X-Access-Ticket') == ticket
             assert handler.headers.get('X-Live-Session') == SESSIONS.get(device)
             if route == 'live/platforms':
-                respond(handler, 0, {'platforms': [{'id': 38, 'name': '测试直播平台', 'platform_code': 'fixture', 'online_num': 1}], 'count': 1})
+                respond(handler, 0, {'platforms': [{'id': 38, 'name': '测试直播平台', 'platform_code': 'fixture', 'online_num': 1},
+                                                 {'id': 11, 'name': 'SC 测试平台', 'platform_code': 'sc_fixture', 'online_num': 1}], 'count': 2})
             elif route == 'live/rooms':
-                assert params.get('platform_id') == '38'
-                respond(handler, 0, {'rooms': [room], 'count': 1})
+                assert params.get('platform_id') in ['38', '11']
+                respond(handler, 0, {'rooms': [sc_room if params['platform_id'] == '11' else room], 'count': 1})
             elif route == 'live/play':
+                if params.get('id') == sc_room['id']:
+                    respond(handler, 0, {**sc_room, 'user_agent': 'Live-SC-Fixture'}, session_key=key)
+                    return True
                 assert params.get('id') == '38_fixture'
                 if device not in RETRIED:
                     # Prove that an expired session is renewed once, without a loop.
