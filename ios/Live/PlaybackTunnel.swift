@@ -445,7 +445,7 @@ final class PlaybackTunnel: @unchecked Sendable {
             if count <= 0 { break }
             data.append(buffer, count: count)
         }
-        return String(data: data, encoding: .isoLatin1)
+        return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
     }
 
     private func write(_ fd: Int32, status: Int, type: String, body: Data, head: Bool, header: String = "") {

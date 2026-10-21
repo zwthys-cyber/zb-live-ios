@@ -48,8 +48,10 @@ def serve(handler, fixture_root):
 #EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=360x480,NAME="480p"
 {origin}/sc/low.m3u8
 ''')
-    elif parsed.path == '/sc/rotation/state':
+    elif parsed.path in ['/sc/rotation/state', '/sc/rotation/reset']:
         import json
+        if parsed.path.endswith('/reset'):
+            ROTATION.update(retired=False, old_reads=0, new_reads=0)
         send(handler, 200, json.dumps(ROTATION), 'application/json')
     elif parsed.path in ['/sc/source.m3u8', '/sc/rotation/source.m3u8']:
         params = parse_qs(parsed.query)

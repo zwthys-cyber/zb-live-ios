@@ -2,7 +2,7 @@
 
 根据提供的 `Stripchat直播.apk` 进行静态分析后，重新实现的 SwiftUI / WebKit / AVKit 应用，最低 iOS 17.0，支持 iPhone 与 iPad。
 
-在 GitHub Releases 下载 `Live-iOS17-TrollStore.ipa`，通过 iPhone「文件 → 分享 → TrollStore」安装。无需 Apple 开发者证书。仓库默认私有，下载需要登录所属 GitHub 账号。
+在 GitHub Releases 下载 `Live-iOS17-TrollStore.ipa`，通过 iPhone「文件 → 分享 → TrollStore」安装。无需 Apple 开发者证书。仓库现为公开，Release 可直接下载。
 
 已实现的功能：
 

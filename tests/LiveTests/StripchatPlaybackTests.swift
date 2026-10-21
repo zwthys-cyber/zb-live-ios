@@ -107,6 +107,7 @@ final class StripchatPlaybackTests: XCTestCase {
     }
 
     func testTunnelRefreshesMasterWhenDescriptorStartsReturningAnAdvertisement() async throws {
+        _ = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:8765/sc/rotation/reset")!)
         let tunnel = PlaybackTunnel(mouflonKeys: MouflonPlaylist.fixtureKeys)
         defer { tunnel.stop() }
         let master = URL(string: "http://127.0.0.1:8765/sc/hls/90002/master/90002_auto.m3u8")!

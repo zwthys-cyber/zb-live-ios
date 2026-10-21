@@ -17,7 +17,9 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-15
+    # The generic macos-15 label uses the capacity-constrained arm64 pool.
+    # Intel hosts can still build the app's arm64 iPhone binary and run iOS tests.
+    runs-on: macos-15-intel
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
@@ -82,7 +84,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      - name: Create private repository release
+      - name: Create repository release
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
